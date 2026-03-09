@@ -1,6 +1,6 @@
 # 🍺 Brouwerij Admin — Home Assistant Addon
 
-Een Home Assistant addon voor het beheren van een kleine ambachtelijke brouwerij. Registreer batches, beheer ingrediënten en voorraad, volg accijnsverplichtingen en synchroniseer met Brewfather — alles vanuit één overzichtelijke interface direct in je HA dashboard.
+Een Home Assistant addon voor het beheren van een kleine brouwerij. Registreer batches, beheer ingrediënten en voorraad, volg accijnsverplichtingen en synchroniseer met Brewfather — alles vanuit één overzichtelijke interface direct in je HA dashboard. Volledig gemaakt met Claude AI.
 
 ---
 
@@ -47,36 +47,9 @@ Een Home Assistant addon voor het beheren van een kleine ambachtelijke brouwerij
 - Accijnstarieven instellen
 - Export en import van alle data (JSON backup)
 
----
-
----
 
 ## Installatie
 
 Voeg deze repo toe aan je Home Assistant apps en installeren maar :) 
 
-## Gebruik
 
-Na installatie en starten verschijnt **Brouwerij** met een bier-icoontje in de HA zijbalk. Klik daarop om de app te openen.
-
-De data wordt opgeslagen in de **browser** (localStorage), net als de standalone HTML versie.
-
----
-
-## Bestanden
-
-| Bestand | Omschrijving |
-|---|---|
-| `config.yaml` | HA addon configuratie |
-| `Dockerfile` | Docker image definitie |
-| `nginx.conf` | Webserver configuratie |
-| `brouwerij-nano.html` | De app zelf |
-
----
-
-## Updates
-
-Als je de app wilt updaten:
-1. Vervang `brouwerij-nano.html` met de nieuwe versie
-2. Verhoog het versienummer in `config.yaml`
-3. Herinstalleer of herbouw de addon in HA
