@@ -14,6 +14,7 @@ from pathlib import Path
 
 DATA_DIR = Path('/data')
 STATIC_FILE = Path('/app/static/index.html')
+MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10 MB — bescherming tegen DoS via grote requests
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -86,6 +87,9 @@ class BrouwerijHandler(http.server.BaseHTTPRequestHandler):
 
         if key is not None:
             length = int(self.headers.get('Content-Length', 0))
+            if length > MAX_CONTENT_LENGTH:
+                self.send_json(413, {'error': 'request too large'})
+                return
             body = self.rfile.read(length)
             try:
                 json.loads(body)  # validate JSON

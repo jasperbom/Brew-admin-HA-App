@@ -136,6 +136,47 @@ const useStore = (key, initial=[]) => {
   return [data, save];
 };
 
+// Zoals useStore, maar slaat gevoelige data NOOIT op in localStorage.
+// Credentials worden alleen in het server-geheugen (/data/*.json) bewaard.
+const useSecureStore = (key, initial={}) => {
+  _allKeys.add(key);
+  const [data, setData] = useState(initial); // geen lsGet — niet uit localStorage laden
+  const modified = React.useRef(false);
+
+  React.useEffect(() => {
+    fetch(API_BASE + key)
+      .then(r => {
+        _serverReachable = true;
+        if (r.ok) return r.json();
+        if (r.status === 404) {
+          _postToServer(key, initial);
+        }
+        return null;
+      })
+      .then(d => {
+        _fetchedKeys.add(key);
+        if (d !== null && d !== undefined && !modified.current) {
+          setData(d); // geen lsSet — niet in localStorage cachen
+        }
+      })
+      .catch(() => {
+        _fetchedKeys.add(key);
+        _serverReachable = false;
+      });
+  }, [key]);
+
+  const save = (val) => {
+    modified.current = true;
+    setData(prev => {
+      const next = typeof val === 'function' ? val(prev) : val;
+      // geen lsSet — niet in localStorage opslaan
+      _postToServer(key, next);
+      return next;
+    });
+  };
+  return [data, save];
+};
+
 // Sync indicator in the nav bar
 const SyncDot = () => {
   const [s, setS] = useState('loading');
@@ -2537,7 +2578,7 @@ function AfvullenPage({bat, setBat, av, setAv, uit, setUit, acc, setAcc, verpakk
               const ac = accijnsCalc(liter, selB?.ABV||0, r1, r2);
               return <div className="p-2 bg-amber-50 rounded text-xs text-amber-800">
                 {liter.toFixed(1)}L → accijns: <strong>{fmt(ac)}</strong>
-                {selB?.ABV && <span className="ml-1 text-amber-600">(max({(liter/100).toFixed(3)}hL × {selB.ABV}% × €7,51, {(liter/100).toFixed(3)}hL × €24,17))</span>}
+                {selB?.ABV && <span className="ml-1 text-amber-600">(max({(liter/100).toFixed(3)}hL × {selB.ABV}% × €{r1.toFixed(2).replace('.',',')}, {(liter/100).toFixed(3)}hL × €{r2.toFixed(2).replace('.',',')}))</span>}
               </div>;
             })()}
             <div className="flex justify-end gap-2">
@@ -3673,6 +3714,16 @@ function InstellingenPage({accijnsInst, setAccijnsInst, log, setLog, doExport, d
   const [bfTesting, setBfTesting] = React.useState(false);
   const [bfMsg, setBfMsg]     = React.useState('');
 
+  // Omdat useSecureStore asynchroon laadt (geen localStorage), het formulier
+  // eenmalig invullen zodra de server-data beschikbaar is.
+  const bfFormInitialized = React.useRef(false);
+  React.useEffect(() => {
+    if (!bfFormInitialized.current && (bfCreds?.userId || bfCreds?.apiKey)) {
+      setBfForm({userId: bfCreds.userId||'', apiKey: bfCreds.apiKey||'', enabled: bfCreds.enabled||false});
+      bfFormInitialized.current = true;
+    }
+  }, [bfCreds?.userId, bfCreds?.apiKey, bfCreds?.enabled]);
+
   const saveBf = () => {
     setBfCreds(prev => ({...prev, ...bfForm}));
     setBfMsg('✓ Opgeslagen');
@@ -3904,7 +3955,7 @@ function App() {
   const [archiefIngeklapt, setArchiefIngeklapt] = useStore('voorraad_archief_ingeklapt', false);
   const [accijnsInst, setAccijnsInst] = useStore('accijns_instellingen', {tarief_per_hl_abv:7.51,tarief_per_hl:24.17});
   const [logo, setLogo] = useStore('app_logo', null);
-  const [bfCreds, setBfCreds] = useStore('brewfather_creds', {userId:'', apiKey:'', enabled:false, lastSync:null});
+  const [bfCreds, setBfCreds] = useSecureStore('brewfather_creds', {userId:'', apiKey:'', enabled:false, lastSync:null});
   const [recepten, setRecepten] = useStore('recepten', []);
   const [verborgen, setVerborgen] = useStore('recepten_verborgen', []);
   const [gearchiveerdeTags, setGearchiveerdeTags] = useStore('recepten_gearchiveerde_tags', []);
