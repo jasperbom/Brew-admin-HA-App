@@ -1,6 +1,8 @@
 # 🍺 Brouwerij Admin — Home Assistant Addon
 
-Een Home Assistant addon voor het beheren van een kleine brouwerij. Registreer batches, beheer ingrediënten en voorraad, volg accijnsverplichtingen en synchroniseer met Brewfather — alles vanuit één overzichtelijke interface direct in je HA dashboard. Volledig gemaakt met Claude AI.
+Een Home Assistant addon voor het beheren van een kleine brouwerij. Registreer batches, beheer ingrediënten en voorraad, volg accijnsverplichtingen en synchroniseer met Brewfather — alles vanuit één overzichtelijke interface direct in je HA dashboard. 
+
+## Volledig gemaakt met Claude AI.
 
 ---
 
