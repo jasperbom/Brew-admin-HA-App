@@ -94,20 +94,26 @@ const _postToServer = (key, data) => {
   });
 };
 
-const useStore = (key, initial=[]) => {
+const useStore = (key, initial=[], { secure=false }={}) => {
   _allKeys.add(key); // Set deduplicates — safe to call on every render
-  const [data, setData] = useState(() => lsGet(key, initial));
+  const [data, setData] = useState(() => secure ? initial : lsGet(key, initial));
   const modified = React.useRef(false);
 
   React.useEffect(() => {
     fetch(API_BASE + key)
       .then(r => {
         _serverReachable = true;
-        if (r.ok) return r.json();
+        if (r.ok) {
+          // Server heeft data — verwijder eventuele oude ls-kopie bij secure sleutels
+          if (secure) localStorage.removeItem('craftery_' + key);
+          return r.json();
+        }
         if (r.status === 404) {
-          // Server doesn't have this key yet — push current data up (localStorage or initial default)
+          // Server heeft deze sleutel nog niet — push localStorage (of initial) omhoog.
+          // Bij secure: ook eventuele oude ls-data migreren (eenmalig upgrade-pad) en dan verwijderen.
           const localRaw = localStorage.getItem('craftery_' + key);
           const toSync = localRaw !== null ? JSON.parse(localRaw) : initial;
+          if (secure && localRaw !== null) localStorage.removeItem('craftery_' + key);
           try { _postToServer(key, toSync); } catch(e) {}
         }
         return null;
@@ -115,7 +121,8 @@ const useStore = (key, initial=[]) => {
       .then(d => {
         _fetchedKeys.add(key);
         if (d !== null && d !== undefined && !modified.current) {
-          setData(d); lsSet(key, d);
+          setData(d);
+          if (!secure) lsSet(key, d);
         }
       })
       .catch(() => {
@@ -128,48 +135,7 @@ const useStore = (key, initial=[]) => {
     modified.current = true;
     setData(prev => {
       const next = typeof val === 'function' ? val(prev) : val;
-      lsSet(key, next);
-      _postToServer(key, next);
-      return next;
-    });
-  };
-  return [data, save];
-};
-
-// Zoals useStore, maar slaat gevoelige data NOOIT op in localStorage.
-// Credentials worden alleen in het server-geheugen (/data/*.json) bewaard.
-const useSecureStore = (key, initial={}) => {
-  _allKeys.add(key);
-  const [data, setData] = useState(initial); // geen lsGet — niet uit localStorage laden
-  const modified = React.useRef(false);
-
-  React.useEffect(() => {
-    fetch(API_BASE + key)
-      .then(r => {
-        _serverReachable = true;
-        if (r.ok) return r.json();
-        if (r.status === 404) {
-          _postToServer(key, initial);
-        }
-        return null;
-      })
-      .then(d => {
-        _fetchedKeys.add(key);
-        if (d !== null && d !== undefined && !modified.current) {
-          setData(d); // geen lsSet — niet in localStorage cachen
-        }
-      })
-      .catch(() => {
-        _fetchedKeys.add(key);
-        _serverReachable = false;
-      });
-  }, [key]);
-
-  const save = (val) => {
-    modified.current = true;
-    setData(prev => {
-      const next = typeof val === 'function' ? val(prev) : val;
-      // geen lsSet — niet in localStorage opslaan
+      if (!secure) lsSet(key, next);
       _postToServer(key, next);
       return next;
     });
@@ -3714,11 +3680,11 @@ function InstellingenPage({accijnsInst, setAccijnsInst, log, setLog, doExport, d
   const [bfTesting, setBfTesting] = React.useState(false);
   const [bfMsg, setBfMsg]     = React.useState('');
 
-  // Omdat useSecureStore asynchroon laadt (geen localStorage), het formulier
+  // Omdat useStore({secure:true}) asynchroon laadt (geen localStorage), het formulier
   // eenmalig invullen zodra de server-data beschikbaar is.
   const bfFormInitialized = React.useRef(false);
   React.useEffect(() => {
-    if (!bfFormInitialized.current && (bfCreds?.userId || bfCreds?.apiKey)) {
+    if (!bfFormInitialized.current && (bfCreds?.userId || bfCreds?.apiKey || bfCreds?.enabled)) {
       setBfForm({userId: bfCreds.userId||'', apiKey: bfCreds.apiKey||'', enabled: bfCreds.enabled||false});
       bfFormInitialized.current = true;
     }
@@ -3955,7 +3921,7 @@ function App() {
   const [archiefIngeklapt, setArchiefIngeklapt] = useStore('voorraad_archief_ingeklapt', false);
   const [accijnsInst, setAccijnsInst] = useStore('accijns_instellingen', {tarief_per_hl_abv:7.51,tarief_per_hl:24.17});
   const [logo, setLogo] = useStore('app_logo', null);
-  const [bfCreds, setBfCreds] = useSecureStore('brewfather_creds', {userId:'', apiKey:'', enabled:false, lastSync:null});
+  const [bfCreds, setBfCreds] = useStore('brewfather_creds', {userId:'', apiKey:'', enabled:false, lastSync:null}, {secure:true});
   const [recepten, setRecepten] = useStore('recepten', []);
   const [verborgen, setVerborgen] = useStore('recepten_verborgen', []);
   const [gearchiveerdeTags, setGearchiveerdeTags] = useStore('recepten_gearchiveerde_tags', []);
