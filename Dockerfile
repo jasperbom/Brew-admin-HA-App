@@ -4,14 +4,17 @@ WORKDIR /app
 
 COPY server.py .
 COPY brew-admin.html ./static/index.html
+COPY entrypoint.sh /entrypoint.sh
 
-# Run as non-root for container hardening
-RUN adduser -D -H -s /sbin/nologin appuser \
+# su-exec: lichtgewicht tool om na rechten-fix naar non-root te wisselen.
+# /data wordt aangemaakt maar HA overschrijft het volume bij runtime —
+# entrypoint.sh herstelt de eigenaar dan alsnog vóór de proces-switch.
+RUN apk add --no-cache su-exec \
+ && adduser -D -H -s /sbin/nologin appuser \
  && mkdir -p /data \
- && chown appuser:appuser /data /app
-
-USER appuser
+ && chmod +x /entrypoint.sh
 
 EXPOSE 8099
 
-CMD ["python3", "server.py"]
+# Entrypoint draait als root, repareert /data-rechten, daarna su-exec → appuser
+CMD ["/entrypoint.sh"]
