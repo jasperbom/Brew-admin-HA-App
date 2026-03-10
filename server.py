@@ -7,9 +7,14 @@ Supports Home Assistant Ingress: requests arrive with a path prefix like
   /api/hassio_ingress/<TOKEN>/api/data/<key>
 The server strips any prefix and looks for /api/data/<key> anywhere in the path.
 """
+import base64
 import http.server
 import json
 import os
+import time
+import urllib.error
+import urllib.request
+from collections import defaultdict
 from pathlib import Path
 
 DATA_DIR = Path('/data')
@@ -19,42 +24,172 @@ MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10 MB — bescherming tegen DoS via gro
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 API_DATA_PREFIX = '/api/data/'
+BF_API_BASE = 'https://api.brewfather.app/v2'
+BF_PROXY_PREFIX = '/api/brewfather/'
+BF_TEST_PATH = '/api/brewfather/test'
+
+# Rate limiting: max requests per window per IP
+_RATE_WINDOW = 60   # seconds
+_RATE_MAX    = 120  # requests per window
+_rate_buckets: dict = defaultdict(list)
 
 
-def extract_key(path):
+def _check_rate(ip: str) -> bool:
+    now = time.monotonic()
+    bucket = _rate_buckets[ip]
+    _rate_buckets[ip] = [t for t in bucket if now - t < _RATE_WINDOW]
+    if len(_rate_buckets[ip]) >= _RATE_MAX:
+        return False
+    _rate_buckets[ip].append(now)
+    return True
+
+
+# Security headers added to every response
+_SEC_HEADERS = [
+    ('X-Content-Type-Options', 'nosniff'),
+    ('X-Frame-Options',        'DENY'),
+    ('Referrer-Policy',        'strict-origin-when-cross-origin'),
+    ('Permissions-Policy',     'geolocation=(), microphone=(), camera=()'),
+]
+
+# Extra headers only on the HTML page
+_CSP = (
+    "default-src 'none'; "
+    "script-src 'unsafe-inline' 'unsafe-eval' "
+        "https://unpkg.com https://cdn.tailwindcss.com https://cdn.sheetjs.com; "
+    "style-src 'unsafe-inline'; "
+    "connect-src 'self'; "
+    "img-src 'self' data: blob:; "
+    "font-src 'self' data:; "
+    "base-uri 'self'; "
+    "form-action 'self'"
+)
+_HTML_EXTRA = [('Content-Security-Policy', _CSP)]
+
+
+def _trusted_origin(origin: str) -> str | None:
+    """Return origin if it is localhost/loopback, else None."""
+    for prefix in ('http://localhost:', 'https://localhost:',
+                   'http://127.0.0.1:', 'https://127.0.0.1:',
+                   'http://[::1]:', 'https://[::1]:'):
+        if origin.startswith(prefix):
+            return origin
+    return None
+
+
+def _valid_key(key: str) -> bool:
+    return bool(key) and all(c.isalnum() or c == '_' for c in key)
+
+
+def _valid_bf_path(path: str) -> bool:
+    """Allow only safe characters in a Brewfather sub-path + query string."""
+    return bool(path) and all(c.isalnum() or c in '-_/?=&.' for c in path)
+
+
+def extract_key(path: str) -> str | None:
     """Extract data key from path, supporting ingress path prefixes."""
     path = path.split('?')[0]
     idx = path.find(API_DATA_PREFIX)
     if idx < 0:
         return None
     key = path[idx + len(API_DATA_PREFIX):].strip('/')
-    if not key or not all(c.isalnum() or c == '_' for c in key):
+    return key if _valid_key(key) else None
+
+
+def _load_bf_creds() -> tuple[str, str] | None:
+    """Read stored Brewfather credentials; returns (userId, apiKey) or None."""
+    creds_file = DATA_DIR / 'brewfather_creds.json'
+    if not creds_file.exists():
         return None
-    return key
+    try:
+        creds = json.loads(creds_file.read_bytes())
+        uid = str(creds.get('userId', '')).strip()
+        key = str(creds.get('apiKey', '')).strip()
+        return (uid, key) if uid and key else None
+    except Exception:
+        return None
+
+
+def _bf_request(uid: str, api_key: str, url: str) -> tuple[int, bytes]:
+    """Make a request to the Brewfather API; returns (status, body)."""
+    auth = base64.b64encode(f'{uid}:{api_key}'.encode()).decode()
+    req = urllib.request.Request(
+        url,
+        headers={'Authorization': f'Basic {auth}', 'Accept': 'application/json'},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.status, resp.read()
+    except urllib.error.HTTPError as e:
+        return e.code, b'{}'
+    except Exception:
+        return 502, b'{}'
 
 
 class BrouwerijHandler(http.server.BaseHTTPRequestHandler):
 
-    def send_json(self, status, data):
+    # ── helpers ────────────────────────────────────────────────────────────
+
+    def _add_security_headers(self, html: bool = False) -> None:
+        for name, value in _SEC_HEADERS:
+            self.send_header(name, value)
+        if html:
+            for name, value in _HTML_EXTRA:
+                self.send_header(name, value)
+        # Restrict CORS to trusted origins only (removes the old wildcard *)
+        origin = self.headers.get('Origin', '')
+        allowed = _trusted_origin(origin)
+        if allowed:
+            self.send_header('Access-Control-Allow-Origin', allowed)
+            self.send_header('Vary', 'Origin')
+
+    def _rate_check(self) -> bool:
+        if not _check_rate(self.client_address[0]):
+            self._json(429, {'error': 'too many requests'})
+            return False
+        return True
+
+    def _json(self, status: int, data) -> None:
         body = json.dumps(data).encode()
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', len(body))
-        self.send_header('Access-Control-Allow-Origin', '*')
+        self._add_security_headers()
         self.end_headers()
         self.wfile.write(body)
 
+    def _read_body(self, max_len: int = MAX_CONTENT_LENGTH) -> bytes | None:
+        length = int(self.headers.get('Content-Length', 0))
+        if length > max_len:
+            self._json(413, {'error': 'request too large'})
+            return None
+        return self.rfile.read(length)
+
+    # ── request routing ────────────────────────────────────────────────────
+
     def do_OPTIONS(self):
+        origin = self.headers.get('Origin', '')
+        allowed = _trusted_origin(origin)
         self.send_response(204)
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        if allowed:
+            self.send_header('Access-Control-Allow-Origin', allowed)
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+            self.send_header('Vary', 'Origin')
+        for name, value in _SEC_HEADERS:
+            self.send_header(name, value)
         self.end_headers()
 
     def do_GET(self):
+        if not self._rate_check():
+            return
         path = self.path.split('?')[0]
-        key = extract_key(path)
 
+        if BF_PROXY_PREFIX in path:
+            self._bf_proxy_get()
+            return
+
+        key = extract_key(path)
         if key is not None:
             filepath = DATA_DIR / f'{key}.json'
             if filepath.exists():
@@ -62,19 +197,20 @@ class BrouwerijHandler(http.server.BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', len(body))
-                self.send_header('Access-Control-Allow-Origin', '*')
+                self._add_security_headers()
                 self.end_headers()
                 self.wfile.write(body)
             else:
-                self.send_json(404, None)
+                self._json(404, None)
             return
 
-        # Serve the app for all other routes
+        # Serve the SPA for all other GET requests
         try:
             body = STATIC_FILE.read_bytes()
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.send_header('Content-Length', len(body))
+            self._add_security_headers(html=True)
             self.end_headers()
             self.wfile.write(body)
         except FileNotFoundError:
@@ -82,29 +218,91 @@ class BrouwerijHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
+        if not self._rate_check():
+            return
         path = self.path.split('?')[0]
-        key = extract_key(path)
 
+        # Brewfather credential test endpoint
+        if BF_TEST_PATH in path:
+            self._bf_test()
+            return
+
+        key = extract_key(path)
         if key is not None:
-            length = int(self.headers.get('Content-Length', 0))
-            if length > MAX_CONTENT_LENGTH:
-                self.send_json(413, {'error': 'request too large'})
+            body = self._read_body()
+            if body is None:
                 return
-            body = self.rfile.read(length)
             try:
                 json.loads(body)  # validate JSON
             except json.JSONDecodeError:
-                self.send_json(400, {'error': 'invalid json'})
+                self._json(400, {'error': 'invalid json'})
                 return
             filepath = DATA_DIR / f'{key}.json'
             filepath.write_bytes(body)
-            self.send_json(200, {'ok': True})
+            self._json(200, {'ok': True})
             return
 
-        self.send_json(404, {'error': 'not found'})
+        self._json(404, {'error': 'not found'})
+
+    # ── Brewfather proxy ───────────────────────────────────────────────────
+
+    def _bf_proxy_get(self):
+        """Proxy a GET request to the Brewfather API using stored credentials."""
+        full = self.path
+        idx = full.find(BF_PROXY_PREFIX)
+        if idx < 0:
+            self._json(400, {'error': 'invalid path'})
+            return
+
+        bf_subpath = full[idx + len(BF_PROXY_PREFIX):]  # includes query string
+        if not _valid_bf_path(bf_subpath):
+            self._json(400, {'error': 'invalid path'})
+            return
+
+        creds = _load_bf_creds()
+        if creds is None:
+            self._json(401, {'error': 'no credentials configured'})
+            return
+
+        uid, api_key = creds
+        status, data = _bf_request(uid, api_key, f'{BF_API_BASE}/{bf_subpath}')
+
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', len(data))
+        self._add_security_headers()
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _bf_test(self):
+        """Test Brewfather credentials supplied in the POST body."""
+        raw = self._read_body(max_len=4096)
+        if raw is None:
+            return
+        try:
+            body = json.loads(raw)
+            uid = str(body.get('userId', '')).strip()
+            key = str(body.get('apiKey', '')).strip()
+        except Exception:
+            self._json(400, {'error': 'invalid json'})
+            return
+
+        if not uid or not key:
+            self._json(400, {'error': 'missing credentials'})
+            return
+
+        # Validate userId characters to prevent header injection
+        if not all(c.isalnum() or c in '-_' for c in uid):
+            self._json(400, {'error': 'invalid userId'})
+            return
+
+        status, _ = _bf_request(uid, key, f'{BF_API_BASE}/batches?limit=1')
+        self._json(200, {'ok': status == 200})
+
+    # ── logging ────────────────────────────────────────────────────────────
 
     def log_message(self, format, *args):
-        # Only log errors to keep logs clean
+        # Only log non-routine status codes
         if args and len(args) >= 2 and str(args[1]) not in ('200', '404', '204'):
             print(f'{self.address_string()} {format % args}', flush=True)
 
