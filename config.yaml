@@ -1,6 +1,6 @@
 name: "BrewAdmin"
 description: "Nano brouwerij administratie — batches, ingrediënten, accijns en voorraad"
-version: "1.2.3"
+version: "1.2.4"
 slug: "brouwerij_admin"
 init: false
 
