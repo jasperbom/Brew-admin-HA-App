@@ -4,7 +4,7 @@ version: "1.2.1"
 slug: "brouwerij_admin"
 init: false
 
-url: "https://github.com/jasperbom/brouwerij-admin-addon"
+url: "https://github.com/jasperbom/BrewAdmin-HA-App"
 
 arch:
   - aarch64
