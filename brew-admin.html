@@ -173,18 +173,33 @@ const SyncDot = () => {
 const newId = (arr) => arr.length ? Math.max(0, ...arr.map(x=>x.id))+1 : 1;
 
 // ===== BREWFATHER INTEGRATION =====
-const BF_BASE = 'https://api.brewfather.app/v2';
+// Alle Brewfather-aanroepen lopen via de backend-proxy zodat de API-credentials
+// nooit in de browser-netwerkinspector verschijnen.
 const BF_TO_APP = {Planning:'Gepland',Brewing:'Brouwen',Fermenting:'Vergisten',Conditioning:'Conditioneren',Completed:'Verpakt',Archived:'Gesloten'};
-const bfHdr = (uid,key) => ({'Authorization':'Basic '+btoa(uid+':'+key),'Content-Type':'application/json'});
-const bfFetch = (uid,key,path,opts={}) => fetch(BF_BASE+path,{...opts,headers:{...bfHdr(uid,key),...(opts.headers||{})}});
-const bfTest  = async (uid,key) => { try { const r=await bfFetch(uid,key,'/batches?limit=1'); return r.ok; } catch { return false; } };
-const bfGetBatches = async (uid,key) => {
+const _BF_PROXY = (() => { const p = window.location.pathname; return p.replace(/[^/]*$/, '') + 'api/brewfather/'; })();
+const _BF_TEST  = (() => { const p = window.location.pathname; return p.replace(/[^/]*$/, '') + 'api/brewfather/test'; })();
+// bfFetch stuurt geen credentials mee — de backend leest ze zelf van schijf.
+const bfFetch = (path, opts={}) => fetch(_BF_PROXY + path.replace(/^\//, ''), opts);
+// bfTest POST'et de (nog niet opgeslagen) credentials naar onze eigen backend.
+const bfTest = async (uid, key) => {
+  try {
+    const r = await fetch(_BF_TEST, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({userId: uid, apiKey: key}),
+    });
+    if (!r.ok) return false;
+    const d = await r.json();
+    return d.ok === true;
+  } catch { return false; }
+};
+const bfGetBatches = async () => {
   const statuses = ['Planning','Brewing','Fermenting','Conditioning','Completed'];
   const all = [];
   for (const s of statuses) {
     let startAfter = null;
     for (;;) {
-      const r = await bfFetch(uid,key,`/batches?status=${s}&complete=true&limit=50${startAfter?'&start_after='+startAfter:''}`);
+      const r = await bfFetch(`batches?status=${s}&complete=true&limit=50${startAfter?'&start_after='+startAfter:''}`);
       if (!r.ok) break;
       const d = await r.json();
       all.push(...d);
@@ -195,11 +210,11 @@ const bfGetBatches = async (uid,key) => {
   return all;
 };
 
-const bfGetRecipes = async (uid, key) => {
+const bfGetRecipes = async () => {
   const all = [];
   let startAfter = null;
   for (;;) {
-    const r = await bfFetch(uid, key, `/recipes?complete=true&limit=50${startAfter?'&start_after='+startAfter:''}`);
+    const r = await bfFetch(`recipes?complete=true&limit=50${startAfter?'&start_after='+startAfter:''}`);
     if (!r.ok) break;
     const d = await r.json();
     all.push(...d);
@@ -1147,7 +1162,7 @@ function BatchesPage({ing, setIng, lots, setLots, bat, setBat, bi, setBi, av, se
     }
     setBfSyncing(true); setBfMsg('');
     try {
-      const bfBatches = await bfGetBatches(bfCreds.userId, bfCreds.apiKey);
+      const bfBatches = await bfGetBatches();
       let added=0, updated=0;
       const newBatches=[], newBis=[], updBatches=[], refreshBisFor=[];
       for (const bfB of bfBatches) {
@@ -3074,7 +3089,7 @@ function ReceptenPage({ing, lots, bfCreds, recepten, setRecepten, verborgen, set
     }
     setSyncing(true); setMsg('');
     try {
-      const recs = await bfGetRecipes(bfCreds.userId, bfCreds.apiKey);
+      const recs = await bfGetRecipes();
       setRecepten(recs);
       setMsg(`✓ ${recs.length} recept${recs.length!==1?'en':''} gesynchroniseerd`);
     } catch(e) { setMsg('⚠ Sync mislukt: '+(e.message||String(e))); }
@@ -3939,7 +3954,7 @@ function App() {
     bfAutoSynced.current = true;
     (async () => {
       try {
-        const bfBatches = await bfGetBatches(bfCreds.userId, bfCreds.apiKey);
+        const bfBatches = await bfGetBatches();
         const newBatches=[], newBis=[], updBatches=[];
         for (const bfB of bfBatches) {
           const existing = bat.find(b => b.brewfather_id === bfB._id ||
