@@ -88,6 +88,10 @@ BrewAdmin-HA-App/
 │   │   ├── btwCategorie.ts # BTW-categoriecodes (UNCL5305) voor e-facturatie: afleiding uit tarief + land + BTW-nummer, VATEX-codes, EU-landenlijst, landkeuzelijst
 │   │   ├── template.ts     # Mustache-subset renderer ({{waarde}}, {{{ruw}}}, {{#sectie}}, {{^omgekeerd}}) — documentlayouts als data
 │   │   ├── factuurTemplate.ts # Standaard factuurlayout + contextbouwer; eigen layout via brewery_details.factuur_template, bij een fout stille terugval
+│   │   ├── factuurMail.ts  # Welke mailtekst bij een verkoopfactuur: `factuur` (open) of `factuur_betaald`
+│   │   │                   # (al voldaan — webshoporder betaald in WooCommerce, kassa, vinkje) + de
+│   │   │                   # betaalvariabelen {betaalregel}/{betaaldatum}/{betaalwijze}; gedeeld door
+│   │   │                   # de boekhoud- en de bestellingenpagina
 │   │   ├── ubl.ts          # E-factuur in UBL 2.1 / PEPPOL BIS Billing 3.0: cent-exact, multi-tarief TaxSubtotals, kortingen als AllowanceCharge, creditnota als CreditNote-document
 │   │   └── excel.ts        # Volledige backup export/import als Excel (.xlsx) via SheetJS
 │   ├── types/index.ts      # TypeScript interfaces

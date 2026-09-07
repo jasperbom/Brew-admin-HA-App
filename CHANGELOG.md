@@ -4,6 +4,26 @@ All notable changes to this project are documented here.
 
 ---
 
+## [1.12.24] — 2026-09-07
+
+### De factuurmail vanaf een webshoporder zegt nu ook dat er al betaald is
+
+Een WooCommerce-order die in de webshop al is afgerekend, leverde bij het
+afronden al een factuur met status *betaald*. Maar de knop **Mail factuur** op
+de bestellingenpagina stuurde nog altijd de gewone factuurtekst mee: "wij
+verzoeken je het bedrag vóór … over te maken". Op de boekhoudpagina ging dat
+al goed; de bestellingenpagina had een eigen mailflow die de betaalstatus
+negeerde.
+
+Beide pagina's gebruiken nu dezelfde keuze (`src/utils/factuurMail.ts`, met
+tests): is de factuur betaald, dan gaat de mail **Factuur-mail (al betaald)**
+uit Instellingen → E-mailtemplates, met de betaaldatum en -methode uit
+WooCommerce ("Deze factuur is al voldaan op 03-09-2026 via iDEAL; je hoeft
+niets meer te doen."). Een openstaande factuur krijgt de gewone tekst met
+vervaldatum en IBAN, zoals voorheen.
+
+---
+
 ## [1.12.23] — 2026-09-01
 
 ### De melding "tegelijk gewijzigd" verschijnt alleen nog als het écht botst
