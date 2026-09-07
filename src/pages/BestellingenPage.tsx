@@ -22,6 +22,7 @@ import { crafteryMeta } from '../utils/craftery'
 import { bierInvulVelden, bierInfoVoorArtikel } from '../utils/bierinfo'
 import { htmlToPdfBase64 } from '../utils/pdf'
 import { qrDataUrl } from '../utils/qr'
+import { factuurMailBetaalVars } from '../utils/factuurMail'
 import { logAudit } from '../utils/audit'
 import { resolveKlantSnapshot, findKlantVoorOrder } from '../utils/klant'
 import { verkoopFactuurBoeking, stornoBoekingVoor, voegBoekingToe } from '../utils/journaal'
@@ -1574,7 +1575,7 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
 
   // Pakt subject/body uit ingestelde mail_templates; valt terug op de i18n-default
   // wanneer de gebruiker niets heeft ingevuld (lege string of niet aanwezig).
-  const tplOrDefault = (key: 'pakbon'|'factuur'|'bestelling', field: 'subject'|'body'): string => {
+  const tplOrDefault = (key: 'pakbon'|'factuur'|'factuur_betaald'|'bestelling', field: 'subject'|'body'): string => {
     const stored = (mailTemplates as any)?.[key]?.[field]
     if (typeof stored === 'string' && stored.trim()) return stored
     return t(`mail_${key}_${field === 'subject' ? 'subject' : 'body'}_default`)
@@ -1625,6 +1626,13 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
         } catch { return '' }
       })()
       const inst = (breweryDetails as any) || {}
+      // Een webshoporder is meestal al afgerekend (iDEAL, creditcard …) vóór
+      // hij hier wordt afgerond; de factuur staat dan op betaald. Die klant
+      // krijgt de "al voldaan"-mail (template `factuur_betaald`) met de
+      // betaaldatum en -methode uit WooCommerce — niet een verzoek om
+      // over te maken. Zelfde logica als op de boekhoudpagina
+      // (utils/factuurMail.ts).
+      const betaal = factuurMailBetaalVars(factuur)
       const vars = {
         naam: (resolvedSelectedOrder?.klant_naam || resolvedSelectedOrder?.klant_bedrijf || ''),
         nr: factuurNr,
@@ -1632,6 +1640,9 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
         vervaldatum: verval,
         iban: inst.iban || '',
         brouwerij: inst.naam || appName || '',
+        betaaldatum: betaal.betaaldatum,
+        betaalwijze: betaal.betaalwijze,
+        betaalregel: betaal.betaalregel,
       }
       // Mollie-betaallink: zelfde regels als op de boekhoudingspagina — alleen
       // voor openstaande (niet-betaalde, niet-credit) facturen met een positief
@@ -1663,8 +1674,8 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
       setMailModal({
         title: t('mail_modal_title_factuur'),
         to: (resolvedSelectedOrder?.klant_email || ''),
-        subject: interpolate(tplOrDefault('factuur', 'subject'), vars),
-        text: interpolate(tplOrDefault('factuur', 'body'), vars),
+        subject: interpolate(tplOrDefault(betaal.kind, 'subject'), vars),
+        text: interpolate(tplOrDefault(betaal.kind, 'body'), vars),
         attachments: [{filename: `Factuur-${factuurNr}.pdf`, contentBase64: pdfBase64, mimeType: 'application/pdf'}],
         kind: 'factuur',
         mollie: mollieCtx,
