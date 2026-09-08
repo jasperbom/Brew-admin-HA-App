@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   faseUitInhoud, schoonTakenOp, DUBBELE_BROUWDAG_CHECK_KEYS,
-  telOpenstaandeBatchTaken, isSchoonmaakTaakAchterstallig, telAchterstalligeSchoonmaakTaken,
+  telOpenstaandeBatchTaken, openstaandeBatchTaken, isSchoonmaakTaakAchterstallig, telAchterstalligeSchoonmaakTaken,
   deactiveerStandaardMetingen, STANDAARD_METING_LABELS,
 } from '../taken'
 
@@ -146,6 +146,27 @@ describe('telOpenstaandeBatchTaken', () => {
 
   it('is robuust voor lege input', () => {
     expect(telOpenstaandeBatchTaken([], [], [])).toBe(0)
+  })
+
+  it('openstaandeBatchTaken geeft per batch de open taken zelf, in groeps- en taakvolgorde', () => {
+    const groepen = [
+      { id: 1, naam: 'Brouwen', fase: 'Brouwen', volgorde: 1 },
+      { id: 9, naam: 'Voorbereiding', fase: 'Brouwen', volgorde: 0 },
+    ]
+    const items = [
+      { id: 1, type: 'check', label: 'Ketel schoon', group_id: 1, volgorde: 1, actief: true },
+      { id: 2, type: 'check', label: 'Hop toegevoegd', group_id: 1, volgorde: 0, actief: true },
+      { id: 3, type: 'check', label: 'Water klaar', group_id: 9, volgorde: 0, actief: true },
+    ]
+    const batches = [
+      { id: 1, status: 'Brouwen', taken_checks: { 3: true } },
+      { id: 2, status: 'Brouwen', taken_checks: { 1: true, 2: true, 3: true } }, // alles af
+      { id: 3, status: 'Gesloten', taken_checks: {} },
+    ]
+    const r = openstaandeBatchTaken(batches, items, groepen)
+    expect(r.map(x => x.batch.id)).toEqual([1])
+    expect(r[0].taken.map((it: any) => it.id)).toEqual([2, 1])
+    expect(telOpenstaandeBatchTaken(batches, items, groepen)).toBe(2)
   })
 })
 

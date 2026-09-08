@@ -3,6 +3,8 @@ import { t } from '../i18n'
 import { newId, bfGetIngredients, bfPushInventory, extractBfProps } from '../utils/api'
 import { bfFermType } from '../utils/ingTypes'
 import { fmt, fmtD, tod, fmtQty, r2, r3 } from '../utils/format'
+import { thtAlertLots } from '../utils/calculations'
+import type { AttentieDoel } from '../utils/attentie'
 import { verpakkingKostenPerStuk } from '../utils/verpakkingKosten'
 import { convertEenheid, compatibeleEenheden, BUILTIN_ING_TYPES, BUILTIN_KOSTEN_SOORTEN, EENHEDEN, ONDERDEEL_TYPES, VERPAKKING_DEFAULTS, LOT_BREW_FIELDS_PER_TYPE, BREW_PROP_UNITS } from '../utils/constants'
 import { getEffectiveBrewProps, getEffectiveBrewProp, stripEmptyBrewProps, formatBrewValue } from '../utils/brewProps'
@@ -47,7 +49,14 @@ interface Props {
   bankKoppelingen?: Record<string, any>
   scanCorrecties?: any[]
   setScanCorrecties?: (v: any) => void
+  /** Deep-link vanuit de attentie-badge of het dashboard: tabblad, THT-filter
+      (`tht_verlopen`/`tht_binnenkort`) en/of één lot om direct te openen.
+      Eenmalig signaal — de pagina consumeert en wist het via onNavDoelConsumed. */
+  navDoel?: AttentieDoel | null
+  onNavDoelConsumed?: () => void
 }
+
+type ThtFilter = 'alle' | 'verlopen' | 'binnenkort'
 
 const IngredientenPage: React.FC<Props> = ({
   ing, setIng, lots, setLots, verpakkingen, setVerpakkingen,
@@ -56,7 +65,8 @@ const IngredientenPage: React.FC<Props> = ({
   ingTypes = BUILTIN_ING_TYPES, ingTypeBtw = {}, kostenSoorten = BUILTIN_KOSTEN_SOORTEN,
   bfCreds = null, auditLog = [], setAuditLog = () => {},
   btwInst = {}, btwAangiftes = [], bankKoppelingen = {},
-  scanCorrecties = [], setScanCorrecties = () => {}
+  scanCorrecties = [], setScanCorrecties = () => {},
+  navDoel = null, onNavDoelConsumed = () => {}
 }) => {
   const btwPeriodeType = (btwInst?.periode === 'maand' ? 'maand' : 'kwartaal') as 'maand'|'kwartaal'
   const btwIngediendeKeys = React.useMemo(
@@ -74,8 +84,32 @@ const IngredientenPage: React.FC<Props> = ({
     bepaalRollover(datum, btwPeriodeType, btwIngediendeKeys, btwBetaaldeKeys),
     [btwPeriodeType, btwIngediendeKeys, btwBetaaldeKeys]
   )
-  const [tab, setTab] = useState('ingredienten')
+  // App.tsx rendert deze pagina conditioneel (mount per navigatie), dus de
+  // useState-initializers volstaan om het navigatiedoel te lezen; de
+  // consumed-callback wist alleen het App-signaal (zie BoekhoudingPage).
+  const [tab, setTab] = useState(navDoel?.tab || 'ingredienten')
   const [sel, setSel] = useState<number | null>(null)
+  // THT-overzicht: álle lots die verlopen zijn of binnen 30 dagen verlopen,
+  // in één lijst — zodat je niet per ingrediënt hoeft te zoeken welk lot de
+  // waarschuwing veroorzaakt. Ingeklapt-stand wordt onthouden; komt de
+  // gebruiker via de attentie-badge binnen, dan staat hij hoe dan ook open
+  // met het filter van die melding.
+  const [thtOpenStore, setThtOpenStore] = useStore('ing_tht_open', true)
+  const [thtForceOpen, setThtForceOpen] = useState(!!navDoel?.filter || !!navDoel?.lotId)
+  const thtOpen = thtForceOpen || !!thtOpenStore
+  const [thtFilter, setThtFilter] = useState<ThtFilter>(
+    navDoel?.filter === 'tht_verlopen' ? 'verlopen' : navDoel?.filter === 'tht_binnenkort' ? 'binnenkort' : 'alle')
+  const thtAlerts = React.useMemo(() => thtAlertLots(lots), [lots])
+  const thtRijen = React.useMemo(() => {
+    const rijen = thtFilter === 'verlopen' ? thtAlerts.verlopen
+      : thtFilter === 'binnenkort' ? thtAlerts.binnenkort
+      : [...thtAlerts.verlopen, ...thtAlerts.binnenkort]
+    return rijen.map(r => ({ ...r, ing: ing.find((i: any) => i.id === r.lot.ingredient_id) }))
+  }, [thtAlerts, thtFilter, ing])
+  const thtDagenLabel = (dagen: number) =>
+    dagen < 0 ? t('ing_tht_dagen_geleden').replace('{n}', String(-dagen))
+      : dagen === 0 ? t('ing_tht_vandaag')
+      : t('ing_tht_over_dagen').replace('{n}', String(dagen))
   const [showO, setShowO] = useState(false)
   const [ontvangstInitTab, setOntvangstInitTab] = useState('ingredienten')
   const [ontvangstInitIngId, setOntvangstInitIngId] = useState('')
@@ -199,6 +233,19 @@ const IngredientenPage: React.FC<Props> = ({
     })
     setLotCorr({ delta: '', richting: '+', reden: '', eenheid: lot.eenheid || '' })
   }
+
+  // Eén specifiek lot openen (deep-link vanaf het dashboard): selecteer het
+  // ingrediënt én open de lot-modal. Daarna het App-signaal wissen, zodat een
+  // latere gewone navigatie naar Ingrediënten niet hetzelfde lot heropent.
+  React.useEffect(() => {
+    if (!navDoel) return
+    if (navDoel.lotId != null) {
+      const lot = lots.find((l: any) => l.id === navDoel.lotId)
+      if (lot) { setSel(lot.ingredient_id); openLot(lot) }
+    }
+    onNavDoelConsumed()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const saveLot = () => {
     const cleanBrewProps = stripEmptyBrewProps(lotEdit.bf_props)
@@ -499,6 +546,69 @@ const IngredientenPage: React.FC<Props> = ({
         {tab === 'verpakkingen' && <Btn onClick={() => { setOntvangstInitTab('verpakkingen'); setOntvangstInitIngId(''); setShowO(true) }}>{t('btn_ontvangst')}</Btn>}
         {tab === 'mutaties' && <Btn onClick={() => { setOntvangstInitTab('ingredienten'); setOntvangstInitIngId(''); setShowO(true) }}>{t('btn_ontvangst')}</Btn>}
       </div>
+
+      {tab === 'ingredienten' && (thtAlerts.verlopen.length > 0 || thtAlerts.binnenkort.length > 0) && (
+        <div className="bg-white rounded-xl shadow-card overflow-hidden mb-4">
+          <SectionHeader
+            title={t('ing_tht_overzicht')}
+            open={thtOpen}
+            onToggle={() => { setThtForceOpen(false); setThtOpenStore(!thtOpen) }}
+            rounded={thtOpen ? 'top' : 'full'}
+            info={<>
+              {thtAlerts.verlopen.length > 0 && <span className="bg-red-500 text-white rounded-full px-1.5 py-0.5 text-[11px] font-semibold">{thtAlerts.verlopen.length}</span>}
+              {thtAlerts.binnenkort.length > 0 && <span className="bg-yellow-400 text-yellow-900 rounded-full px-1.5 py-0.5 text-[11px] font-semibold">{thtAlerts.binnenkort.length}</span>}
+            </>}
+          />
+          {thtOpen && (
+            <div>
+              <div className="flex flex-wrap items-center gap-1 px-3 py-2 border-b border-gray-100">
+                {([
+                  ['alle', thtAlerts.verlopen.length + thtAlerts.binnenkort.length],
+                  ['verlopen', thtAlerts.verlopen.length],
+                  ['binnenkort', thtAlerts.binnenkort.length],
+                ] as [ThtFilter, number][]).map(([f, n]) => (
+                  <button key={f} type="button" onClick={() => setThtFilter(f)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${thtFilter === f ? 'tbtn text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                    {t(`ing_tht_filter_${f}`)} <span className="opacity-70">({n})</span>
+                  </button>
+                ))}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-xs text-gray-500 bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left">{t('lbl_name')}</th>
+                      <th className="px-3 py-2 text-left">{t('lbl_lot_short')}</th>
+                      <th className="px-3 py-2 text-right">{t('lbl_quantity_short')}</th>
+                      <th className="px-3 py-2 text-left">{t('lbl_tht')}</th>
+                      <th className="px-3 py-2 text-left"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {thtRijen.length === 0 && <tr><td colSpan={5} className="px-3 py-4 text-center text-gray-400">{t('ing_tht_leeg')}</td></tr>}
+                    {thtRijen.map(({ lot, dagen, ing: li }) => {
+                      const exp = dagen < 0
+                      return (
+                        <tr key={lot.id} className={`cursor-pointer t-hover transition-colors ${exp ? 'bg-red-50' : 'bg-yellow-50'}`}
+                          onClick={() => { setSel(lot.ingredient_id); openLot(lot) }}>
+                          <td className="px-3 py-2">
+                            <div className="font-medium leading-snug">{li?.naam || t('lbl_onbekend')}</div>
+                            {(li?.fabrikant || lot.leverancier) && <div className="text-xs text-gray-500 leading-snug">{li?.fabrikant || lot.leverancier}</div>}
+                          </td>
+                          <td className="px-3 py-2 text-xs">{lot.lotnummer || '—'}</td>
+                          <td className="px-3 py-2 text-right font-mono whitespace-nowrap">{fmtQty(lot.hoeveelheid)} <span className="text-xs text-gray-400">{lot.eenheid}</span></td>
+                          <td className={`px-3 py-2 text-xs whitespace-nowrap ${exp ? 'text-red-600 font-semibold' : 'text-yellow-700'}`}>{fmtD(lot.houdbaarheid)}{exp ? ' ⚠️' : ''}</td>
+                          <td className={`px-3 py-2 text-xs whitespace-nowrap ${exp ? 'text-red-600' : 'text-yellow-700'}`}>{thtDagenLabel(dagen)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {tab === 'ingredienten' && (
         <div className="flex flex-col md:flex-row gap-4 md:items-start">
