@@ -22,6 +22,7 @@ import { printFactuur, buildFactuurHTML, printHerinnering, buildHerinneringHTML 
 import MailModal from '../components/MailModal'
 import { htmlToPdfBase64 } from '../utils/pdf'
 import { qrDataUrl } from '../utils/qr'
+import { factuurMailBetaalVars } from '../utils/factuurMail'
 
 
 function BoekhoudingPage({wcCreds, inkoopFacturen=[], setInkoopFacturen=()=>{}, ing=[], setIng=()=>{}, lots=[], setLots=()=>{}, onderdelen=[], setOnderdelen=()=>{}, verpakkingen=[], log=[], setLog=()=>{}, btwInst={}, claudeCreds=null, ingTypes=BUILTIN_ING_TYPES, ingTypeBtw={}, verkoopFacturen=[], setVerkoopFacturen=()=>{}, bestellingen=[], setPage=()=>{}, setOpenOrderId=()=>{}, bat=[], acc=[], setAcc=()=>{}, breweryDetails={}, factuurLogo=null, klanten=[], setKlanten=()=>{}, factuurCounter={jaar:0,nr:0}, setFactuurCounter=()=>{}, artikelen=[], bankKoppelingen={}, setBankKoppelingen=()=>{}, kapitaalBoekingen=[], setKapitaalBoekingen=()=>{}, altRekeningen=[], setAltRekeningen=()=>{}, accijnsAangiftes=[], setAccijnsAangiftes=()=>{}, btwAangiftes=[], setBtwAangiftes=()=>{}, av=[], uit=[], afboekingen=[], bi=[], accijnsInst=null, auditLog=[], setAuditLog=()=>{}, kostenSoorten=BUILTIN_KOSTEN_SOORTEN, smtpCreds={enabled:false}, mollieCreds={enabled:false}, appName='', logo=null, mailTemplates={}, scanCorrecties=[], setScanCorrecties=()=>{}, journaal=[], setJournaal=()=>{}, bankSaldi={}, setBankSaldi=()=>{}, jaarafsluitingen=[], setJaarafsluitingen=()=>{}, initialTab=null, onInitialTabConsumed=()=>{}, merchArtikelen=[], setMerchArtikelen=()=>{}, merchVoorraadLog=[], setMerchVoorraadLog=()=>{}}: any) {
@@ -1049,20 +1050,9 @@ function BoekhoudingPage({wcCreds, inkoopFacturen=[], setInkoopFacturen=()=>{}, 
       // Een al betaalde factuur (webshoporder die in WooCommerce is afgerekend,
       // kassaverkoop, handmatig afgevinkt) krijgt een eigen mailtekst: vragen om
       // geld dat al binnen is, is de kortste weg naar een verwarde klant.
-      const isBetaald = factuur.status === 'betaald'
-      const betaaldOp = (() => {
-        const d = factuur.wc_betaald_datum || factuur.betaald_datum || ''
-        if (!d) return ''
-        try { return new Date(d).toLocaleDateString('nl-NL', {day:'2-digit', month:'2-digit', year:'numeric'}) }
-        catch { return String(d) }
-      })()
-      const betaaldVia = String(factuur.wc_betaal_methode || factuur.betaalwijze || '').trim()
-      const betaalregel = !isBetaald ? ''
-        : betaaldOp && betaaldVia
-          ? t('mail_betaalregel_op_via').replace('{datum}', betaaldOp).replace('{methode}', betaaldVia)
-          : betaaldOp
-            ? t('mail_betaalregel_op').replace('{datum}', betaaldOp)
-            : t('mail_betaalregel')
+      // Keuze + betaalvariabelen in utils/factuurMail.ts (gedeeld met de
+      // bestellingenpagina).
+      const betaal = factuurMailBetaalVars(factuur)
       const vars = {
         naam: resolved.klant_naam || '',
         nr: factuurNr,
@@ -1070,9 +1060,9 @@ function BoekhoudingPage({wcCreds, inkoopFacturen=[], setInkoopFacturen=()=>{}, 
         vervaldatum: verval,
         iban: inst.iban || '',
         brouwerij: inst.naam || appName || '',
-        betaaldatum: betaaldOp,
-        betaalwijze: betaaldVia,
-        betaalregel,
+        betaaldatum: betaal.betaaldatum,
+        betaalwijze: betaal.betaalwijze,
+        betaalregel: betaal.betaalregel,
       }
       const ontvanger = klant?.email || resolved.klant_email || ''
       // Mollie-betaallink: alleen aanbieden voor openstaande (niet-betaalde,
@@ -1103,12 +1093,11 @@ function BoekhoudingPage({wcCreds, inkoopFacturen=[], setInkoopFacturen=()=>{}, 
         const pdf2 = await htmlToPdfBase64(html2)
         return [{filename: `Factuur-${factuurNr}.pdf`, contentBase64: pdf2, mimeType: 'application/pdf'}]
       } : undefined
-      const tplKind = isBetaald ? 'factuur_betaald' as const : 'factuur' as const
       setMailModal({
         title: t('mail_modal_title_factuur'),
         to: ontvanger,
-        subject: interpolate(tplOrDefault(tplKind, 'subject'), vars),
-        text: interpolate(tplOrDefault(tplKind, 'body'), vars),
+        subject: interpolate(tplOrDefault(betaal.kind, 'subject'), vars),
+        text: interpolate(tplOrDefault(betaal.kind, 'body'), vars),
         attachments: [{filename: `Factuur-${factuurNr}.pdf`, contentBase64: pdfBase64, mimeType: 'application/pdf'}],
         factuurId: factuur.id,
         mollie: mollieCtx,

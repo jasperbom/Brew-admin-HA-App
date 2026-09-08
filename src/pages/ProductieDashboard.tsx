@@ -6,6 +6,7 @@ import { TANK_REINIGING_LABEL_KEY } from '../utils/constants'
 import type { TankReinigingStatus, TankStatusMap } from '../types'
 import { telOpenstaandeBatchTaken } from '../utils/taken'
 import { bewakingLabel, type BatchOordeel } from '../utils/tankbewaking'
+import type { AttentieDoel } from '../utils/attentie'
 import { volgendeBrouwdagStap } from '../utils/brouwdag'
 import { newId } from '../utils/api'
 import { logAudit } from '../utils/audit'
@@ -42,6 +43,9 @@ interface ProductieDashboardProps {
   setPage: (id: string) => void
   setNavBatchId: (id: number | null) => void
   setPreNieuwBatch: (v: any) => void
+  /** Navigeert naar een exact doel (pagina + tabblad/filter/lot) — zie
+      utils/attentie.ts. Zonder deze prop valt de kaart terug op setPage. */
+  gaNaarDoel?: (d: AttentieDoel) => void
 }
 
 type MetingForm = { sg: string, ph: string, temp: string }
@@ -71,6 +75,7 @@ function ProductieDashboard({
   batchTakenItems = [], batchTakenGroepen = [], brouwdagStappen = [],
   lots = [], ing = [], gistMetingen = [], setGistMetingen = () => {}, auditLog = [], setAuditLog = () => {},
   setPage, setNavBatchId, setPreNieuwBatch = () => {},
+  gaNaarDoel,
 }: ProductieDashboardProps) {
   const batchNaam = (b: any) => b?.naam || b?.biernaam || t('lbl_naamloos')
 
@@ -395,7 +400,8 @@ function ProductieDashboard({
       {/* ── Taken vandaag ────────────────────────────────────────────────── */}
       {takenVandaag.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm mb-6">
-          <SectionHeader title={t('dash_taken_vandaag')} info={takenVandaag.length} onToggle={() => setPage('batchflow')} rounded="top" />
+          <SectionHeader title={t('dash_taken_vandaag')} info={takenVandaag.length}
+            onToggle={() => gaNaarDoel ? gaNaarDoel({ pagina: 'batchflow', filter: 'taken' }) : setPage('batchflow')} rounded="top" />
           <div className="divide-y divide-gray-100">
             {takenVandaag.map(({ batch, label }: any) => (
               <div key={batch.id} className="flex items-center justify-between gap-3 px-5 py-3 min-h-[44px] hover:bg-gray-50 cursor-pointer"
@@ -417,14 +423,15 @@ function ProductieDashboard({
           <SectionHeader
             title={t('dash_tht_waarschuwingen')}
             info={<span className={thtTelling.verlopen > 0 ? 'text-red-600 font-semibold' : 'text-yellow-700 font-semibold'}>{thtTelling.verlopen + thtTelling.binnenkort}</span>}
-            onToggle={() => setPage('ingredienten')}
+            onToggle={() => gaNaarDoel ? gaNaarDoel({ pagina: 'ingredienten', tab: 'ingredienten', filter: 'tht_alle' }) : setPage('ingredienten')}
             rounded="top"
           />
           <div className="divide-y divide-gray-100">
             {thtRijen.map((l: any) => {
               const verlopen = new Date(l.houdbaarheid) < new Date(new Date().setHours(0, 0, 0, 0))
               return (
-                <div key={l.id} className="flex items-center justify-between gap-3 px-5 py-3 min-h-[44px] hover:bg-gray-50 cursor-pointer" onClick={() => setPage('ingredienten')}>
+                <div key={l.id} className="flex items-center justify-between gap-3 px-5 py-3 min-h-[44px] hover:bg-gray-50 cursor-pointer"
+                  onClick={() => gaNaarDoel ? gaNaarDoel({ pagina: 'ingredienten', tab: 'ingredienten', lotId: l.id }) : setPage('ingredienten')}>
                   <div className="min-w-0">
                     <span className="font-medium text-sm text-gray-800">{ing.find((i: any) => i.id === l.ingredient_id)?.naam || t('lbl_onbekend')}</span>
                     <div className="text-xs text-gray-500 mt-0.5">{fmtQty(l.hoeveelheid)} {l.eenheid}</div>

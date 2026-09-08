@@ -32,6 +32,9 @@ BrewAdmin-HA-App/
 │   ├── pages/              # Feature pages (one per domain)
 │   ├── utils/
 │   │   ├── api.ts          # API client & state management
+│   │   ├── merge.ts        # Conflict-samenvoeging bij een 409: lokale en serverwijziging op
+│   │   │                   # verschillende records gaan beide mee; alleen hetzelfde record aan
+│   │   │                   # beide kanten is een botsing (server wint). Arrays met `id` + objecten
 │   │   ├── constants.ts    # Enums, mappings, defaults
 │   │   ├── format.ts       # Formatting utilities
 │   │   ├── calculations.ts # Business logic calculations
@@ -87,6 +90,10 @@ BrewAdmin-HA-App/
 │   │   ├── btwCategorie.ts # BTW-categoriecodes (UNCL5305) voor e-facturatie: afleiding uit tarief + land + BTW-nummer, VATEX-codes, EU-landenlijst, landkeuzelijst
 │   │   ├── template.ts     # Mustache-subset renderer ({{waarde}}, {{{ruw}}}, {{#sectie}}, {{^omgekeerd}}) — documentlayouts als data
 │   │   ├── factuurTemplate.ts # Standaard factuurlayout + contextbouwer; eigen layout via brewery_details.factuur_template, bij een fout stille terugval
+│   │   ├── factuurMail.ts  # Welke mailtekst bij een verkoopfactuur: `factuur` (open) of `factuur_betaald`
+│   │   │                   # (al voldaan — webshoporder betaald in WooCommerce, kassa, vinkje) + de
+│   │   │                   # betaalvariabelen {betaalregel}/{betaaldatum}/{betaalwijze}; gedeeld door
+│   │   │                   # de boekhoud- en de bestellingenpagina
 │   │   ├── ubl.ts          # E-factuur in UBL 2.1 / PEPPOL BIS Billing 3.0: cent-exact, multi-tarief TaxSubtotals, kortingen als AllowanceCharge, creditnota als CreditNote-document
 │   │   └── excel.ts        # Volledige backup export/import als Excel (.xlsx) via SheetJS
 │   ├── types/index.ts      # TypeScript interfaces
@@ -113,6 +120,16 @@ BrewAdmin-HA-App/
   record-delta naar `POST /api/delta/<key>` (pure logica in
   `src/utils/delta.ts`); bij herordening, records zonder id of een oude
   server valt de client stil terug op de volledige POST
+- Conflict-samenvoeging: het versieslot van de optimistic locking zit op de
+  hele key, terwijl een 409 bijna altijd over een ánder record gaat (de
+  servertick schrijft zelf in `batches`/`gist_metingen`, en een tweede tab of
+  de telefoon schrijft ook mee). `_losConflictOp` in `api.ts` haalt daarom de
+  verse serverstand op en legt de eigen wijziging er per record overheen
+  (pure logica in `src/utils/merge.ts`, werkt op arrays met `id` én op
+  objecten). Alleen wanneer hetzelfde record aan beide kanten anders werd
+  wint de server en volgt een melding; een enkele waarde (thema, appnaam,
+  ingeklapt-stand) wordt stil opnieuw weggeschreven. **Een conflict is dus
+  geen reden meer om de invoer van de gebruiker weg te gooien** — houd dat zo
 - Home Assistant Ingress strips path prefix; server handles both `/` and `/brouwerij_admin/` paths
 
 ### Backend data persistence
@@ -190,8 +207,9 @@ templaterenderer + factuurlayout, de Excel-backup-round-trip, de
 tanktemperatuurbewaking (incl. het werkelijke setpoint van
 de koeling) en de HACCP-beheerspunten
 (risicoclassificatie, stabiliteit, vrijgave-oordeel, sluitcontrole,
-allergenenvergelijking, lotcode en THT) en de traceerbaarheid
-(één stap terug/vooruit, massabalans, traceergaten, oefeningstatus).
+allergenenvergelijking, lotcode en THT), de traceerbaarheid
+(één stap terug/vooruit, massabalans, traceergaten, oefeningstatus) en de
+conflict-samenvoeging (`merge.ts` + het 409-pad van `api.ts`).
 
 `server.py` heeft een pytest-suite (ERP-plan 3.2) in `tests/test_server.py`:
 key-/upload-validatie, schemavalidatie (422), append-only-guard (422),

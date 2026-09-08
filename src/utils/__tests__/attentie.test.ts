@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { attentiePosten, attentieTotalen, attentieTotaal, AttentieBron } from '../attentie'
+import { attentiePosten, attentieTotalen, attentieTotaal, attentieDoel, AttentieBron } from '../attentie'
 
 const leegBron = (): AttentieBron => ({
   batches: [], batchTakenItems: [], batchTakenGroepen: [],
@@ -46,6 +46,32 @@ describe('attentiePosten', () => {
     expect(posten.every(p => p.sleutel.startsWith('attentie_'))).toBe(true)
   })
 
+  it('geeft elke post een exact doel: tabblad en/of filter op de doelpagina', () => {
+    const bron = leegBron()
+    bron.batches = [{ id: 1, status: 'Aan het gisten', taken_checks: {} }]
+    bron.batchTakenGroepen = [{ id: 'g1', fase: 'Aan het gisten' }]
+    bron.batchTakenItems = [{ id: 'i1', group_id: 'g1', type: 'check', actief: true }]
+    bron.schoonmaakTaken = [{ id: 's1', frequentie: 'wekelijks', actief: true }]
+    bron.lots = [
+      { id: 1, beschikbaar: true, hoeveelheid: 5, houdbaarheid: '2026-05-01' },
+      { id: 2, beschikbaar: true, hoeveelheid: 5, houdbaarheid: '2026-05-20' },
+    ]
+    bron.bestellingen = [{ id: 1, status: 'nieuw', datum: '2026-05-01', regels: [{ id: 'r1', type: 'bier', aantal: 6 }] }]
+    bron.facturen = [{ datum: '2026-02-11' }]
+    const alle = attentiePosten(bron)
+    const doelen = Object.fromEntries(
+      [...alle.productie, ...alle.verkoop, ...alle.administratie].map(p => [p.id, attentieDoel(p)]),
+    )
+    expect(doelen).toEqual({
+      batchtaken: { pagina: 'batchflow', filter: 'taken' },
+      schoonmaak: { pagina: 'haccp', tab: 'reiniging' },
+      tht_verlopen: { pagina: 'ingredienten', tab: 'ingredienten', filter: 'tht_verlopen' },
+      tht_binnenkort: { pagina: 'ingredienten', tab: 'ingredienten', filter: 'tht_binnenkort' },
+      bestellingen: { pagina: 'bestellingen', filter: 'te_picken' },
+      btw: { pagina: 'boekhouding', tab: 'btw_aangifte' },
+    })
+  })
+
   it('laat posten met aantal 0 weg', () => {
     const bron = leegBron()
     bron.lots = [{ id: 1, beschikbaar: true, hoeveelheid: 5, houdbaarheid: '2026-05-01' }]
@@ -60,7 +86,7 @@ describe('attentiePosten', () => {
       { id: 2, status: 'verzonden', datum: '2026-05-02', regels: [{ id: 'r2', type: 'bier', aantal: 6 }] },
     ]
     const posten = attentiePosten(bron).verkoop
-    expect(posten).toEqual([{ id: 'bestellingen', sleutel: 'attentie_bestellingen', pagina: 'bestellingen', aantal: 1 }])
+    expect(posten).toEqual([{ id: 'bestellingen', sleutel: 'attentie_bestellingen', pagina: 'bestellingen', filter: 'te_picken', aantal: 1 }])
   })
 
   it('telt openstaande BTW-perioden onder Administratie, over huidig + vorig jaar', () => {

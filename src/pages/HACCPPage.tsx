@@ -23,7 +23,15 @@ type Tab = 'dashboard'|'kritisch'|'reiniging'|'allergenen'|'traceerbaarheid'|'re
 
 function HACCPPage(props: any) {
   const {useState} = React
-  const [tab, setTab] = useState<Tab>('dashboard')
+  // Starttab uit het navigatiedoel (attentie-badge "Achterstallige schoonmaak-
+  // taken" → tabblad Reiniging). App.tsx mount de pagina per navigatie, dus de
+  // useState-initializer volstaat; de callback wist alleen het App-signaal.
+  const {navDoel, onNavDoelConsumed} = props
+  const [tab, setTab] = useState<Tab>((navDoel?.tab as Tab) || 'dashboard')
+  React.useEffect(() => {
+    if (navDoel && onNavDoelConsumed) onNavDoelConsumed()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [modal, setModal] = useState<string|null>(null)
   const [edit, setEdit] = useState<any>(null)
 

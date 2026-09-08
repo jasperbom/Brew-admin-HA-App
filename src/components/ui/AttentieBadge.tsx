@@ -11,16 +11,17 @@ interface AttentieBadgeProps {
   open: boolean
   onToggle: () => void
   onSluit: () => void
-  /** Navigeert naar de pagina waar de post afgehandeld wordt. */
-  onGaNaar: (pagina: string) => void
+  /** Navigeert naar de plek waar de post afgehandeld wordt (pagina + tab/filter). */
+  onGaNaar: (post: AttentiePost) => void
 }
 
 // Badge met het aantal openstaande punten op een werkruimte-knop. Het getal
 // alleen zegt niets, dus de badge is zélf een knop: hover geeft de opsomming
 // als tooltip, klikken opent een uitklap met per regel het label, het aantal en
-// een sprong naar de pagina waar je het afhandelt. De uitklap staat `fixed`
-// (net als de nav-submenu's) omdat de headerbalk horizontaal scrollt en een
-// absolute laag daarin afgeknipt zou worden.
+// een sprong naar precies de plek waar je het afhandelt (de post draagt zijn
+// eigen doel: pagina + tabblad/filter). De uitklap staat `fixed` (net als de
+// nav-submenu's) omdat de headerbalk horizontaal scrollt en een absolute laag
+// daarin afgeknipt zou worden.
 const AttentieBadge: React.FC<AttentieBadgeProps> = ({
   titel, posten, achtergrond, open, onToggle, onSluit, onGaNaar,
 }) => {
@@ -58,7 +59,7 @@ const AttentieBadge: React.FC<AttentieBadgeProps> = ({
                 <button
                   key={p.id}
                   type="button"
-                  onClick={() => { onSluit(); onGaNaar(p.pagina) }}
+                  onClick={() => { onSluit(); onGaNaar(p) }}
                   className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-white/80 hover:bg-white/10 hover:text-white transition-colors border-b border-white/5 last:border-b-0">
                   <span className="bg-orange-500 text-white text-xs rounded-full px-1 min-w-[1.15rem] h-[1.15rem] flex items-center justify-center leading-none font-bold flex-shrink-0">{p.aantal}</span>
                   <span className="flex-1">{t(p.sleutel)}</span>

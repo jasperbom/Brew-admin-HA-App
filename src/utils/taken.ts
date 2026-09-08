@@ -98,26 +98,48 @@ export const schoonTakenOp = (groepen: any[], items: any[]): TakenOpschoning => 
 // die BatchFlowPage gebruikt om de checklist van de actieve stap te tonen
 // (groepFase(g) === batch.status); metingen (CCP's) tellen hier niet mee —
 // die zijn geen open/dicht-vinkje maar een losse waarneming.
+export interface OpenstaandeBatchTaken {
+  batch: any
+  /** De nog niet afgevinkte check-taken van de huidige fase, in groeps-/taakvolgorde. */
+  taken: any[]
+}
+
+// De open taken zélf, per batch — zodat een pagina ze allemaal in één lijst
+// kan tonen en met één klik naar de juiste batch springt. Batches zonder
+// open taak vallen weg; volgorde = die van de batches zelf.
+export const openstaandeBatchTaken = (
+  batches: any[],
+  batchTakenItems: any[],
+  batchTakenGroepen: any[],
+): OpenstaandeBatchTaken[] => {
+  const items = (batchTakenItems?.length ? batchTakenItems : DEFAULT_BATCH_TAKEN_ITEMS)
+    .filter((it: any) => it?.actief !== false && it?.type === 'check')
+  const groepen = batchTakenGroepen?.length ? batchTakenGroepen : DEFAULT_BATCH_TAKEN_GROEPEN
+  const uit: OpenstaandeBatchTaken[] = []
+  for (const b of (batches || [])) {
+    if (!b || b.status === 'Gesloten') continue
+    const groepIds = groepen
+      .filter((g: any) => groepFase(g) === b.status)
+      .sort((a: any, c: any) => (a.volgorde || 0) - (c.volgorde || 0))
+      .map((g: any) => g.id)
+    if (!groepIds.length) continue
+    const checks = b.taken_checks || {}
+    const open = items
+      .filter((it: any) => groepIds.includes(it.group_id) && !checks[it.id])
+      .sort((a: any, c: any) =>
+        (groepIds.indexOf(a.group_id) - groepIds.indexOf(c.group_id)) || ((a.volgorde || 0) - (c.volgorde || 0)))
+    if (open.length) uit.push({ batch: b, taken: open })
+  }
+  return uit
+}
+
 export const telOpenstaandeBatchTaken = (
   batches: any[],
   batchTakenItems: any[],
   batchTakenGroepen: any[],
-): number => {
-  const items = (batchTakenItems?.length ? batchTakenItems : DEFAULT_BATCH_TAKEN_ITEMS)
-    .filter((it: any) => it?.actief !== false && it?.type === 'check')
-  const groepen = batchTakenGroepen?.length ? batchTakenGroepen : DEFAULT_BATCH_TAKEN_GROEPEN
-  let totaal = 0
-  for (const b of (batches || [])) {
-    if (!b || b.status === 'Gesloten') continue
-    const groepIds = groepen.filter((g: any) => groepFase(g) === b.status).map((g: any) => g.id)
-    if (!groepIds.length) continue
-    const checks = b.taken_checks || {}
-    for (const it of items) {
-      if (groepIds.includes(it.group_id) && !checks[it.id]) totaal++
-    }
-  }
-  return totaal
-}
+): number =>
+  openstaandeBatchTaken(batches, batchTakenItems, batchTakenGroepen)
+    .reduce((s, r) => s + r.taken.length, 0)
 
 // Vervaldata per schoonmaak-frequentie (dagen sinds de laatste log voordat
 // een taak als achterstallig geldt). Spiegelt HACCPPage's DashTab/

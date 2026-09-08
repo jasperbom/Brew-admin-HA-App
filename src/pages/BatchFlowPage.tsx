@@ -16,6 +16,9 @@ import {
 } from '../utils/calculations'
 import { logAudit } from '../utils/audit'
 import { getEffectiveBrewProp } from '../utils/brewProps'
+import { ingredientenVoorType } from '../utils/ingTypes'
+import { openstaandeBatchTaken } from '../utils/taken'
+import type { AttentieDoel } from '../utils/attentie'
 import { registreerOntsmetting, taakReinigingStatus, taakSchoonmaakTaakId } from '../utils/ontsmetting'
 import {
   vergistProjectie, huidigeStapStartMs, stapDoelDagen, stapIsGereed, dagenInStap, verpakProjectie,
@@ -92,6 +95,11 @@ interface BatchFlowPageProps {
   preNieuwBatch?: any,
   setPreNieuwBatch?: (v: any) => void,
   ccpMetingen?: any[], setCcpMetingen?: any,
+  /** Deep-link vanuit de attentie-badge: filter 'taken' opent het paneel met
+      alle openstaande batchtaken in het overzicht. Eenmalig signaal — de
+      pagina consumeert en wist het via onNavDoelConsumed. */
+  navDoel?: AttentieDoel | null,
+  onNavDoelConsumed?: () => void,
 }
 
 interface ChecklistItem {
@@ -368,8 +376,19 @@ const BatchFlowPage: React.FC<BatchFlowPageProps> = ({
   setPage, setNavBatchId, openBatchId,
   preNieuwBatch, setPreNieuwBatch,
   ccpMetingen, setCcpMetingen,
+  navDoel = null, onNavDoelConsumed = () => {},
 }) => {
   const [sel, setSel] = useState<number | null>(openBatchId ?? null)
+  // Paneel "openstaande batchtaken" in het overzicht: álle batches met open
+  // taken op een rij, klik = de batch op zijn actieve fase. Standaard
+  // ingeklapt (het dashboard toont ze ook), open bij binnenkomst via de
+  // attentie-badge. App.tsx mount de pagina per navigatie, dus de
+  // useState-initializer volstaat; de callback wist alleen het App-signaal.
+  const [takenOpen, setTakenOpen] = useState(navDoel?.filter === 'taken')
+  React.useEffect(() => {
+    if (navDoel) onNavDoelConsumed()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [openFasen, setOpenFasen] = useState<number[]>([])
   // Handmatig open/dicht-geklapte stappen. Zolang een stap hier niet in staat,
   // volgt hij de default (open = niet-afgerond).
@@ -617,7 +636,7 @@ const BatchFlowPage: React.FC<BatchFlowPageProps> = ({
     logAudit(auditLog, setAuditLog, {entiteit: 'Batch', entiteit_id: nb.id, actie: 'aangemaakt', omschrijving: nb.naam})
     if (recept) {
       const receptIng = [
-        ...(recept.mout   || []).map((i: any) => ({ ingredient_naam: i.naam, ingredient_type: 'Mout',   hoeveelheid: i.hoeveelheid, eenheid: i.eenheid || 'kg',  ingredient_id: i.ingredient_id ?? null, extract_pct: i.extract_pct })),
+        ...(recept.mout   || []).map((i: any) => ({ ingredient_naam: i.naam, ingredient_type: i.ingredient_type || 'Mout',   hoeveelheid: i.hoeveelheid, eenheid: i.eenheid || 'kg',  ingredient_id: i.ingredient_id ?? null, extract_pct: i.extract_pct })),
         ...(recept.hop    || []).map((i: any) => ({ ingredient_naam: i.naam, ingredient_type: 'Hop',    hoeveelheid: i.hoeveelheid, eenheid: i.eenheid || 'g',   ingredient_id: i.ingredient_id ?? null, gebruik: i.gebruik, tijdstip_min: i.tijd, alpha_pct: i.alpha_pct, temp_c: i.temp_c })),
         ...(recept.gist   || []).map((i: any) => ({ ingredient_naam: i.naam, ingredient_type: 'Gist',   hoeveelheid: i.hoeveelheid, eenheid: i.eenheid || 'pkg', ingredient_id: i.ingredient_id ?? null })),
         ...(recept.overig || []).map((i: any) => ({ ingredient_naam: i.naam, ingredient_type: 'Overig', hoeveelheid: i.hoeveelheid, eenheid: i.eenheid || 'g',   ingredient_id: i.ingredient_id ?? null, gebruik: i.gebruik })),
@@ -837,11 +856,7 @@ const BatchFlowPage: React.FC<BatchFlowPageProps> = ({
   }
 
   // Lijst van ingredienten voor de koppel-dropdown, gefilterd op type.
-  const batchIngOptions = (ingType: string): any[] => {
-    const type = ingType || 'Overig'
-    return [...(ing || []).filter((i: any) => i.type === type)]
-      .sort((a: any, b: any) => String(a.naam).localeCompare(String(b.naam), 'nl'))
-  }
+  const batchIngOptions = (ingType: string): any[] => ingredientenVoorType(ing, ingType)
 
   const isDryHopRij = (row: any) => {
     const g = String(row.gebruik || '').toLowerCase()
@@ -1202,7 +1217,7 @@ const BatchFlowPage: React.FC<BatchFlowPageProps> = ({
     }
     setBat((prev: any[]) => prev.map((b: any) => b.id === selB.id ? {...b, ...patch} : b))
     const nieuweIng = [
-      ...(r.mout   || []).map((i: any) => ({ ingredient_naam: i.naam, ingredient_type: 'Mout',   hoeveelheid: i.hoeveelheid, eenheid: i.eenheid || 'kg',  ingredient_id: i.ingredient_id ?? null, extract_pct: i.extract_pct })),
+      ...(r.mout   || []).map((i: any) => ({ ingredient_naam: i.naam, ingredient_type: i.ingredient_type || 'Mout',   hoeveelheid: i.hoeveelheid, eenheid: i.eenheid || 'kg',  ingredient_id: i.ingredient_id ?? null, extract_pct: i.extract_pct })),
       ...(r.hop    || []).map((i: any) => ({ ingredient_naam: i.naam, ingredient_type: 'Hop',    hoeveelheid: i.hoeveelheid, eenheid: i.eenheid || 'g',   ingredient_id: i.ingredient_id ?? null, gebruik: i.gebruik, tijdstip_min: i.tijd, alpha_pct: i.alpha_pct, temp_c: i.temp_c })),
       ...(r.gist   || []).map((i: any) => ({ ingredient_naam: i.naam, ingredient_type: 'Gist',   hoeveelheid: i.hoeveelheid, eenheid: i.eenheid || 'pkg', ingredient_id: i.ingredient_id ?? null })),
       ...(r.overig || []).map((i: any) => ({ ingredient_naam: i.naam, ingredient_type: 'Overig', hoeveelheid: i.hoeveelheid, eenheid: i.eenheid || 'g',   ingredient_id: i.ingredient_id ?? null, gebruik: i.gebruik })),
@@ -1836,12 +1851,53 @@ const BatchFlowPage: React.FC<BatchFlowPageProps> = ({
     const nieuwRecept = nieuwForm.recept_id
       ? beschikbareRecepten.find((r: any) => String(r.id) === String(nieuwForm.recept_id))
       : null
+    // Dezelfde selectie als de attentie-badge (utils/taken.ts): open check-
+    // taken van de groep die bij de huidige fase van elke open batch hoort.
+    const openTaken = openstaandeBatchTaken(bat, batchTakenItems, batchTakenGroepen)
+    const openTakenTotaal = openTaken.reduce((s, r) => s + r.taken.length, 0)
     return (
       <div className="space-y-4">
         <div className="bg-white rounded-xl shadow-card overflow-hidden">
           <SectionHeader title={t('flow_titel')} info={betaBadge} />
           <div className="p-4 text-sm text-gray-600">{t('flow_intro')}</div>
         </div>
+
+        {openTaken.length > 0 && (
+          <div className="bg-white rounded-xl shadow-card overflow-hidden">
+            <SectionHeader title={t('attentie_batchtaken')} open={takenOpen}
+              onToggle={() => setTakenOpen(o => !o)} rounded={takenOpen ? 'top' : 'full'}
+              info={<span className="bg-orange-500 text-white rounded-full px-1.5 py-0.5 text-[11px] font-semibold">{openTakenTotaal}</span>} />
+            {takenOpen && (
+              <div className="divide-y divide-gray-100">
+                {openTaken.map(({batch: b, taken}) => {
+                  const { titel } = batchTitels(b)
+                  return (
+                    <div key={b.id} className="px-4 py-3 hover:bg-gray-50 cursor-pointer" onClick={() => openBatch(b.id)}>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0 flex items-baseline gap-2">
+                          {b.batch_nummer && <span className="font-mono font-bold text-sm flex-shrink-0" style={{color: 'var(--t-accent)'}}>{b.batch_nummer}</span>}
+                          <span className="font-medium text-sm text-gray-800 truncate">{titel}</span>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className="text-xs text-gray-500">{t('dash_taken_open_n').replace('{n}', String(taken.length))}</span>
+                          <Badge s={b.status} />
+                        </div>
+                      </div>
+                      <ul className="mt-1.5 text-xs text-gray-600 flex flex-wrap gap-x-4 gap-y-1">
+                        {taken.map((it: any) => (
+                          <li key={it.id} className="flex items-center gap-1.5">
+                            <span className="inline-block w-3 h-3 rounded border border-gray-300 bg-white flex-shrink-0" aria-hidden="true" />
+                            {taakLabel(it)}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Planning-tijdlijn (samengevoegd met de vroegere Planning-pagina) */}
         <div className="space-y-3">

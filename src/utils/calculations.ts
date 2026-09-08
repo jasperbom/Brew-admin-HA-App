@@ -1704,6 +1704,18 @@ export const gemAgpInPeriode = (
 
 export type ReceptCategorie = 'mout' | 'hop' | 'gist' | 'overig'
 
+// Map ingredient_type (zoals op Batch) naar de recept-categorie die we voor
+// de planning gebruiken. Suiker (kandij, dextrose, honing) hoort bij 'overig',
+// ook als de regel uit de moutlijst van Brewfather komt. Onbekende types
+// vallen eveneens terug op 'overig'.
+const typeToCategorie = (t?: string): ReceptCategorie => {
+  const s = String(t || '').toLowerCase()
+  if (s.includes('mout')) return 'mout'
+  if (s.includes('hop')) return 'hop'
+  if (s.includes('gist')) return 'gist'
+  return 'overig'
+}
+
 export interface GeschaaldeBehoefte {
   naam: string
   hoeveelheid: number
@@ -1721,7 +1733,7 @@ export const scaleRecipeNeeds = (recept: Recept, targetL: number): GeschaaldeBeh
   const out: GeschaaldeBehoefte[] = []
   const categorieen: ReceptCategorie[] = ['mout', 'hop', 'gist', 'overig']
   for (const cat of categorieen) {
-    const lijst = (recept as any)[cat] as Array<{naam: string, hoeveelheid: number, eenheid: string}> | undefined
+    const lijst = (recept as any)[cat] as Array<{naam: string, hoeveelheid: number, eenheid: string, ingredient_type?: string}> | undefined
     if (!Array.isArray(lijst)) continue
     for (const ri of lijst) {
       const q = Number(ri?.hoeveelheid || 0) * f
@@ -1730,7 +1742,10 @@ export const scaleRecipeNeeds = (recept: Recept, targetL: number): GeschaaldeBeh
         naam: String(ri.naam).trim(),
         hoeveelheid: q,
         eenheid: String(ri.eenheid || ''),
-        categorie: cat,
+        // Een regel met een eigen type (suiker in de moutlijst) telt mee in de
+        // categorie van dát type, zodat dezelfde behoefte via het recept en
+        // via de batchregels in dezelfde regel van de bestellijst landt.
+        categorie: ri.ingredient_type ? typeToCategorie(ri.ingredient_type) : cat,
       })
     }
   }
@@ -1742,16 +1757,6 @@ export interface AggregaatBehoefte {
   eenheid: string
   categorie: ReceptCategorie
   totaal: number
-}
-
-// Map ingredient_type (zoals op Batch) naar de recept-categorie die we voor
-// de planning gebruiken. Onbekende types vallen terug op 'overig'.
-const typeToCategorie = (t?: string): ReceptCategorie => {
-  const s = String(t || '').toLowerCase()
-  if (s.includes('mout')) return 'mout'
-  if (s.includes('hop')) return 'hop'
-  if (s.includes('gist')) return 'gist'
-  return 'overig'
 }
 
 // Aggregeert ingrediëntbehoefte over meerdere batches. Primaire bron: de
@@ -2272,19 +2277,48 @@ export const fgStabiel = (
 // Zelfde selectie als voorheen inline in App.tsx (thtAlert/thtWarn).
 export interface ThtAlertTelling { verlopen: number; binnenkort: number }
 
+/** Eén lot dat om aandacht vraagt; `dagen` = dagen tot de THT-datum
+    (negatief = al zoveel dagen verlopen, 0 = vandaag). */
+export interface ThtAlertLot { lot: any; dagen: number }
+export interface ThtAlertLots { verlopen: ThtAlertLot[]; binnenkort: ThtAlertLot[] }
+
+// Een 'YYYY-MM-DD' wordt als lokale datum gelezen; `new Date('YYYY-MM-DD')`
+// is UTC-middernacht en verschuift de dag in tijdzones west van UTC.
+const parseLokaleDatum = (s: any): Date => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || ''))
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  const d = new Date(s); d.setHours(0, 0, 0, 0)
+  return d
+}
+
+// De lots zélf achter de telling, gesorteerd op THT-datum (oudste eerst) —
+// zodat een pagina ze allemaal in één lijst kan tonen in plaats van de
+// gebruiker per ingrediënt te laten zoeken.
+export const thtAlertLots = (
+  lots: any[],
+  vandaag: Date = new Date(),
+  binnenDagen = 30,
+): ThtAlertLots => {
+  const t0 = new Date(vandaag); t0.setHours(0, 0, 0, 0)
+  const verlopen: ThtAlertLot[] = [], binnenkort: ThtAlertLot[] = []
+  for (const l of (lots || [])) {
+    if (!l?.beschikbaar || !(Number(l.hoeveelheid || 0) > 0) || !l.houdbaarheid) continue
+    const d = parseLokaleDatum(l.houdbaarheid)
+    if (isNaN(d.getTime())) continue
+    const dagen = Math.round((d.getTime() - t0.getTime()) / 86400000)
+    if (d < t0) verlopen.push({ lot: l, dagen })
+    else if (dagen <= binnenDagen) binnenkort.push({ lot: l, dagen })
+  }
+  const opDatum = (a: ThtAlertLot, b: ThtAlertLot) => a.dagen - b.dagen
+  return { verlopen: verlopen.sort(opDatum), binnenkort: binnenkort.sort(opDatum) }
+}
+
 export const telThtAlerts = (
   lots: any[],
   vandaag: Date = new Date(),
   binnenDagen = 30,
 ): ThtAlertTelling => {
-  const t0 = new Date(vandaag); t0.setHours(0, 0, 0, 0)
-  let verlopen = 0, binnenkort = 0
-  for (const l of (lots || [])) {
-    if (!l?.beschikbaar || !(Number(l.hoeveelheid || 0) > 0) || !l.houdbaarheid) continue
-    const d = new Date(l.houdbaarheid)
-    if (d < t0) verlopen++
-    else if ((d.getTime() - t0.getTime()) / 86400000 <= binnenDagen) binnenkort++
-  }
-  return { verlopen, binnenkort }
+  const r = thtAlertLots(lots, vandaag, binnenDagen)
+  return { verlopen: r.verlopen.length, binnenkort: r.binnenkort.length }
 }
 

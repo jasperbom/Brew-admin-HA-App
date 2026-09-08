@@ -4,35 +4,7 @@ All notable changes to this project are documented here.
 
 ---
 
-## [1.12.23] — 2026-08-25
-
-### Bij het product: kostprijs en accijns uit elkaar, en het gat gedicht
-
-De kostprijs/liter bij een product telde accijns al mee, maar zei dat nergens —
-en het recept houdt hem juist apart. Naast elkaar leggen ging dus mis. Twee
-ingrepen:
-
-- **De strip zegt nu wat je ziet**: `KOSTPRIJS/L · incl. accijns`. En de
-  batchtabel heeft een eigen kolom **Accijns/L**, met de opbouw
-  ("Productie €1,37 + accijns €0,61 per liter") in de tooltip van de
-  kostprijscel.
-- **Afvullingen van vóór v2.4 telden hun accijns als nul.** Die hebben geen
-  uitslag én geen bevroren voorcalculatie, waardoor hun kostprijs stil te laag
-  uitkwam — en de trendlijn een sprong maakte tussen oude en nieuwe batches.
-  `berekenBatchKostprijs` schat die nu alsnog uit ABV/Plato en het tarief van de
-  brouwdatum. In de tabel staat zo'n bedrag cursief met een `~` ervoor, en
-  onder de tabel waarom.
-
-`berekenBatchKostprijs` geeft daarvoor `accijns`, `totaal_kosten_excl_accijns`,
-`kostprijs_per_liter_excl_accijns` en `accijns_bron` terug (`geboekt` →
-`voorcalc` → `geschat` → `geen`; bij meerdere verpakkingstypen wint de zwakste).
-De schatting is **opt-in via een nieuw, optioneel `accijnsInst`-argument**:
-alleen de productpagina geeft dat mee. De W&V en de COGS draaien onveranderd op
-werkelijke cijfers — die mogen nooit op een schatting steunen.
-
----
-
-## [1.12.22] — 2026-08-25
+## [1.12.26] — 2026-09-08
 
 ### Accijns voorberekend bij het recept
 
@@ -67,6 +39,146 @@ export en wat onder schorsing blijft betaal je geen accijns.
 
 Hiermee is de voorcalculatie eindelijk vergelijkbaar met de batchkostprijs, die
 accijns al meetelde.
+
+### Bij het product: kostprijs en accijns uit elkaar, en het gat gedicht
+
+De kostprijs/liter bij een product telde accijns al mee, maar zei dat nergens —
+en het recept houdt hem juist apart. Naast elkaar leggen ging dus mis. Twee
+ingrepen:
+
+- **De strip zegt nu wat je ziet**: `KOSTPRIJS/L · incl. accijns`. En de
+  batchtabel heeft een eigen kolom **Accijns/L**, met de opbouw
+  ("Productie €1,37 + accijns €0,61 per liter") in de tooltip van de
+  kostprijscel.
+- **Afvullingen van vóór v2.4 telden hun accijns als nul.** Die hebben geen
+  uitslag én geen bevroren voorcalculatie, waardoor hun kostprijs stil te laag
+  uitkwam — en de trendlijn een sprong maakte tussen oude en nieuwe batches.
+  `berekenBatchKostprijs` schat die nu alsnog uit ABV/Plato en het tarief van de
+  brouwdatum. In de tabel staat zo'n bedrag cursief met een `~` ervoor, en
+  onder de tabel waarom.
+
+`berekenBatchKostprijs` geeft daarvoor `accijns`, `totaal_kosten_excl_accijns`,
+`kostprijs_per_liter_excl_accijns` en `accijns_bron` terug (`geboekt` →
+`voorcalc` → `geschat` → `geen`; bij meerdere verpakkingstypen wint de zwakste).
+De schatting is **opt-in via een nieuw, optioneel `accijnsInst`-argument**:
+alleen de productpagina geeft dat mee. De W&V en de COGS draaien onveranderd op
+werkelijke cijfers — die mogen nooit op een schatting steunen.
+
+---
+
+## [1.12.25] — 2026-09-08
+
+### De meldingen in de header brengen je nu precies waar het over gaat
+
+De ballonnetjes op **Productie / Verkoop / Administratie** lieten bij het
+uitklappen wel zien wát er om aandacht vroeg, maar een klik op zo'n regel
+sprong alleen naar een pagina. "Lots over de THT-datum" bracht je naar de
+ingrediëntenlijst, waar je vervolgens ingrediënt voor ingrediënt moest
+openklikken om te vinden wélk lot het was.
+
+Elke melding draagt nu zijn eigen doel (`src/utils/attentie.ts`, met tests) —
+pagina én tabblad/filter — en de pagina opent daar meteen op:
+
+- **Lots over de THT-datum / die binnenkort verlopen** → Ingrediënten met een
+  nieuw **THT-overzicht** bovenaan: álle verlopen en bijna-verlopen lots in
+  één lijst (ingrediënt, lotnummer, hoeveelheid, THT, dagen), met de filters
+  *Alle / Verlopen / Binnenkort* al op de aangeklikte melding gezet. Klik op
+  een regel opent direct dat lot. Het overzicht staat er altijd zodra er
+  THT-waarschuwingen zijn (inklapbaar; de stand wordt onthouden), en de
+  THT-regels op het productie-dashboard springen nu naar het lot zelf.
+- **Openstaande batchtaken** → Batchflow met het paneel *Openstaande
+  batchtaken* open: per batch de nog niet afgevinkte taken, klik = de batch
+  op zijn actieve fase.
+- **Achterstallige schoonmaaktaken** → HACCP, tabblad *Reiniging*.
+- **Bestellingen om te picken** → Bestellingen met het nieuwe filter
+  **Te picken** (nieuw/bevestigd én nog niet volledig gepickt — dezelfde
+  selectie als de telling).
+- **Openstaande BTW-periodes** → Boekhouding, tabblad *BTW-aangifte*.
+
+---
+
+## [1.12.24] — 2026-09-07
+
+### De factuurmail vanaf een webshoporder zegt nu ook dat er al betaald is
+
+Een WooCommerce-order die in de webshop al is afgerekend, leverde bij het
+afronden al een factuur met status *betaald*. Maar de knop **Mail factuur** op
+de bestellingenpagina stuurde nog altijd de gewone factuurtekst mee: "wij
+verzoeken je het bedrag vóór … over te maken". Op de boekhoudpagina ging dat
+al goed; de bestellingenpagina had een eigen mailflow die de betaalstatus
+negeerde.
+
+Beide pagina's gebruiken nu dezelfde keuze (`src/utils/factuurMail.ts`, met
+tests): is de factuur betaald, dan gaat de mail **Factuur-mail (al betaald)**
+uit Instellingen → E-mailtemplates, met de betaaldatum en -methode uit
+WooCommerce ("Deze factuur is al voldaan op 03-09-2026 via iDEAL; je hoeft
+niets meer te doen."). Een openstaande factuur krijgt de gewone tekst met
+vervaldatum en IBAN, zoals voorheen.
+
+---
+
+## [1.12.23] — 2026-09-01
+
+### De melding "tegelijk gewijzigd" verschijnt alleen nog als het écht botst
+
+Het versieslot dat verloren werk moet voorkomen, zat op een hele datasleutel.
+Wijzigde er iets anders in `batches` — een servertick die het cold-crash-
+setpoint verzet, een gistmeting, een tweede tab, je telefoon — dan botste
+daarna élke opslag op die sleutel, ook als die een compleet ander record
+raakte. Je kreeg een schrikmelding én je invoer was weg.
+
+De app lost zo'n botsing nu eerst zelf op. Bij een conflict haalt hij de verse
+serverstand op en legt jouw wijziging daar per record overheen:
+
+- Andere records aan beide kanten? Beide wijzigingen blijven staan, zonder
+  melding — er is niets verloren gegaan.
+- Hetzelfde record aan beide kanten anders? Daar wint de serverversie, en de
+  melding noemt hoeveel regels dat betrof. Je overige wijzigingen blijven wél
+  bewaard.
+- Eén enkele waarde (thema, appnaam, een ingeklapte sectie)? Die wordt stil
+  opnieuw weggeschreven: bij één waarde is de laatste wijziging de bedoelde.
+
+Twee bronnen van valse conflicten zijn ook weg:
+
+- Een pagina die je pas later opent (Batches, Ingrediënten) las zijn gegevens
+  nog uit de momentopname van het opstarten. Die toonde verouderde data én
+  zette een verouderd versienummer, waardoor de eerstvolgende klik gegarandeerd
+  op een conflict liep. Na 15 seconden haalt zo'n sleutel zijn eigen verse
+  stand op.
+- Een ophaalactie die onderweg was terwijl er geschreven werd, kon achteraf een
+  verouderd versienummer terugzetten. Elke sleutel heeft nu een generatie-
+  stempel; een verlaat antwoord wordt genegeerd.
+
+Nieuw: `src/utils/merge.ts` (pure logica, met tests) en het 409-pad van
+`api.ts`.
+
+---
+
+## [1.12.22] — 2026-09-01
+
+### Kandijsuiker in het recept herkent nu het suiker-ingredient
+
+Brewfather zet mout, suiker en honing in één lijst (`fermentables`). De app nam
+die lijst integraal over als type **Mout**, terwijl dezelfde kandijsuiker uit de
+Brewfather-voorraad als **Suiker** binnenkwam — receptregel en voorraad-
+ingredient vonden elkaar dus niet, en de koppel-dropdown liet het suiker-
+ingredient niet eens zien.
+
+- Bij de import houdt een fermentable zijn werkelijke type: `Sugar`/`Honey` →
+  Suiker, `Adjunct`/`Juice`/`Other` → Overig, de rest Mout. Dat geldt voor het
+  recept én voor de batchregels (`bfMapRecipe`, `bfMapBis`), en de nieuwe
+  `bfFermType` is de enige plek waar die vertaling staat.
+- Nieuw: `src/utils/ingTypes.ts` met verwante typegroepen. Bij het koppelen zijn
+  Mout ↔ Suiker en Overig ↔ Suiker uitwisselbaar, dus ook een recept dat nog
+  niet opnieuw gesynct is (suikerregel met type Mout) is aan het juiste
+  ingredient te koppelen. Hop en gist blijven strikt gescheiden.
+- De koppel-dropdowns op de receptpagina, de batchflow en de batchpagina lopen
+  alle drie via dezelfde `ingredientenVoorType` — eigen type eerst, daarna de
+  verwante typen.
+- In de moutlijst van een recept staat voortaan het type erbij als het afwijkt
+  van de sectie, zodat een suikerregel niet als mout leest.
+- De bestellijst telt een suikerregel uit de moutlijst in dezelfde categorie,
+  ongeacht of de behoefte uit het recept of uit de batchregels komt.
 
 ---
 
