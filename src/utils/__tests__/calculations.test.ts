@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   accijnsCalc, tariefVoorDatum, accijnsMaandGesloten, berekenWinstVerlies,
   voorraadPerLocatie, ouderdomsAnalyse, berekenBatchKostprijs,
-  berekenProductKostprijs, berekenCogs, telThtAlerts, laatsteOpenAccijnsMaand,
+  berekenProductKostprijs, berekenCogs, telThtAlerts, thtAlertLots, laatsteOpenAccijnsMaand,
   productIdsVoorBatch, batchHoortBijProduct, vrijeTanksMetStatus,
   registreerTankReiniging, laatsteTankReiniging,
   berekenVoorcalcVoorAfvulling, agpValueAt, agpOverzicht, berekenAccijnsImpact,
@@ -369,6 +369,36 @@ describe('telThtAlerts', () => {
 
   it('is robuust voor lege input', () => {
     expect(telThtAlerts([], vandaag)).toEqual({ verlopen: 0, binnenkort: 0 })
+  })
+})
+
+describe('thtAlertLots', () => {
+  const vandaag = new Date('2026-07-20T12:00:00Z')
+
+  it('geeft de lots zelf terug, per groep en op THT-datum gesorteerd, met dagen tot/sinds de THT', () => {
+    const lots = [
+      { id: 1, beschikbaar: true, hoeveelheid: 5, houdbaarheid: '2026-08-01' },  // over 12 dagen
+      { id: 2, beschikbaar: true, hoeveelheid: 5, houdbaarheid: '2026-07-01' },  // 19 dagen verlopen
+      { id: 3, beschikbaar: true, hoeveelheid: 5, houdbaarheid: '2026-07-25' },  // over 5 dagen
+      { id: 4, beschikbaar: true, hoeveelheid: 5, houdbaarheid: '2026-07-15' },  // 5 dagen verlopen
+      { id: 5, beschikbaar: true, hoeveelheid: 5, houdbaarheid: '2027-01-01' },  // ver weg
+      { id: 6, beschikbaar: true, hoeveelheid: 0, houdbaarheid: '2026-07-01' },  // leeg
+    ]
+    const r = thtAlertLots(lots, vandaag)
+    expect(r.verlopen.map(x => [x.lot.id, x.dagen])).toEqual([[2, -19], [4, -5]])
+    expect(r.binnenkort.map(x => [x.lot.id, x.dagen])).toEqual([[3, 5], [1, 12]])
+  })
+
+  it('een THT van vandaag telt als binnenkort (0 dagen), niet als verlopen', () => {
+    const lots = [{ id: 1, beschikbaar: true, hoeveelheid: 1, houdbaarheid: '2026-07-20' }]
+    const r = thtAlertLots(lots, vandaag)
+    expect(r.verlopen).toEqual([])
+    expect(r.binnenkort.map(x => x.dagen)).toEqual([0])
+  })
+
+  it('slaat een onleesbare datum over', () => {
+    const lots = [{ id: 1, beschikbaar: true, hoeveelheid: 1, houdbaarheid: 'geen datum' }]
+    expect(thtAlertLots(lots, vandaag)).toEqual({ verlopen: [], binnenkort: [] })
   })
 })
 

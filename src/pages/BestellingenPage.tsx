@@ -28,7 +28,8 @@ import { resolveKlantSnapshot, findKlantVoorOrder } from '../utils/klant'
 import { verkoopFactuurBoeking, stornoBoekingVoor, voegBoekingToe } from '../utils/journaal'
 import { totaliseerRegels, centNaarEuro } from '../utils/centen'
 import { regelBedrag, heeftAutoritair } from '../utils/orderRegel'
-import { matchAfvullingenVoorRegel, diagnosePickMatch } from '../utils/picking'
+import { matchAfvullingenVoorRegel, diagnosePickMatch, bestellingenOmTePicken } from '../utils/picking'
+import type { AttentieDoel } from '../utils/attentie'
 import {
   MerchArtikel, MerchMutatie, merchLabel, onthoudMerch, vergeetMerch, verwijderMerch,
   volgtVoorraad, merchVoorraad, merchVoorraadWaarde, merchLogVoorArtikel,
@@ -83,6 +84,10 @@ interface BestellingenPageProps {
   setMerchArtikelen?: any
   merchVoorraadLog?: MerchMutatie[]
   setMerchVoorraadLog?: any
+  /** Deep-link vanuit de attentie-badge: startfilter van de lijst (`te_picken`).
+      Eenmalig signaal — de pagina consumeert en wist het via onNavDoelConsumed. */
+  navDoel?: AttentieDoel | null
+  onNavDoelConsumed?: () => void
 }
 
 // Bedrag-in-tabel: bewerkt lokaal en schrijft pas bij verlaten/Enter weg, zodat
@@ -103,7 +108,7 @@ const MerchGetal: React.FC<{waarde?: number, onSave: (v: number | undefined) => 
   )
 }
 
-type StatusFilter = 'alle' | 'nieuw' | 'bevestigd' | 'gepickt' | 'verzonden' | 'afgerond' | 'geannuleerd'
+type StatusFilter = 'alle' | 'te_picken' | 'nieuw' | 'bevestigd' | 'gepickt' | 'verzonden' | 'afgerond' | 'geannuleerd'
 
 const STATUS_COLORS: Record<string, string> = {
   nieuw: 'bg-blue-100 text-blue-700',
@@ -135,6 +140,7 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
   setJournaal=()=>{},
   merchArtikelen=[], setMerchArtikelen=()=>{},
   merchVoorraadLog=[], setMerchVoorraadLog=()=>{},
+  navDoel=null, onNavDoelConsumed=()=>{},
 }) => {
   const [view, setView] = useState<'list' | 'detail'>('list')
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -154,7 +160,19 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
       setOpenOrderId(null)
     }
   }, [openOrderId]) // eslint-disable-line react-hooks/exhaustive-deps
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('alle')
+  // Startfilter uit het navigatiedoel (attentie-badge "Bestellingen om te
+  // picken" → filter 'te_picken'). App.tsx mount de pagina per navigatie, dus
+  // de useState-initializer volstaat; de callback wist alleen het App-signaal.
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(navDoel?.filter === 'te_picken' ? 'te_picken' : 'alle')
+  React.useEffect(() => {
+    if (navDoel) onNavDoelConsumed()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  // "Te picken" = dezelfde selectie als de attentie-badge en het Verkoop-
+  // dashboard (utils/picking.ts): nieuw/bevestigd én nog niet volledig gepickt.
+  const omTePickenIds = React.useMemo(
+    () => new Set(bestellingenOmTePicken(bestellingen, bestellingPicks).map((b: any) => b.id)),
+    [bestellingen, bestellingPicks])
   const [wcImporting, setWcImporting] = useState(false)
   const [wcMsg, setWcMsg] = useState('')
   const [showManualModal, setShowManualModal] = useState(false)
@@ -230,7 +248,7 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
 
   // Gefilterde en gesorteerde lijst
   const filtered = [...(bestellingen||[])]
-    .filter(b => statusFilter === 'alle' || b.status === statusFilter)
+    .filter(b => statusFilter === 'alle' || (statusFilter === 'te_picken' ? omTePickenIds.has(b.id) : b.status === statusFilter))
     .sort((a, b) => b.datum.localeCompare(a.datum))
 
   // Ordertotaal berekenen — cent-exact en met behoud van de autoritatieve
@@ -2454,8 +2472,8 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div className="flex items-center gap-1 flex-wrap">
           <h2 className="text-xl font-bold text-gray-800 mr-4">{t('orders_title')}</h2>
-          {(['alle','nieuw','bevestigd','gepickt','verzonden','afgerond','geannuleerd'] as StatusFilter[]).map(s => {
-            const count = s === 'alle' ? 0 : (bestellingen||[]).filter(b => b.status === s).length
+          {(['alle','te_picken','nieuw','bevestigd','gepickt','verzonden','afgerond','geannuleerd'] as StatusFilter[]).map(s => {
+            const count = s === 'alle' ? 0 : s === 'te_picken' ? omTePickenIds.size : (bestellingen||[]).filter(b => b.status === s).length
             return (
               <button key={s} onClick={() => setStatusFilter(s)}
                 className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${statusFilter===s ? 't-tab font-semibold' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>

@@ -4,6 +4,37 @@ All notable changes to this project are documented here.
 
 ---
 
+## [1.12.25] — 2026-09-08
+
+### De meldingen in de header brengen je nu precies waar het over gaat
+
+De ballonnetjes op **Productie / Verkoop / Administratie** lieten bij het
+uitklappen wel zien wát er om aandacht vroeg, maar een klik op zo'n regel
+sprong alleen naar een pagina. "Lots over de THT-datum" bracht je naar de
+ingrediëntenlijst, waar je vervolgens ingrediënt voor ingrediënt moest
+openklikken om te vinden wélk lot het was.
+
+Elke melding draagt nu zijn eigen doel (`src/utils/attentie.ts`, met tests) —
+pagina én tabblad/filter — en de pagina opent daar meteen op:
+
+- **Lots over de THT-datum / die binnenkort verlopen** → Ingrediënten met een
+  nieuw **THT-overzicht** bovenaan: álle verlopen en bijna-verlopen lots in
+  één lijst (ingrediënt, lotnummer, hoeveelheid, THT, dagen), met de filters
+  *Alle / Verlopen / Binnenkort* al op de aangeklikte melding gezet. Klik op
+  een regel opent direct dat lot. Het overzicht staat er altijd zodra er
+  THT-waarschuwingen zijn (inklapbaar; de stand wordt onthouden), en de
+  THT-regels op het productie-dashboard springen nu naar het lot zelf.
+- **Openstaande batchtaken** → Batchflow met het paneel *Openstaande
+  batchtaken* open: per batch de nog niet afgevinkte taken, klik = de batch
+  op zijn actieve fase.
+- **Achterstallige schoonmaaktaken** → HACCP, tabblad *Reiniging*.
+- **Bestellingen om te picken** → Bestellingen met het nieuwe filter
+  **Te picken** (nieuw/bevestigd én nog niet volledig gepickt — dezelfde
+  selectie als de telling).
+- **Openstaande BTW-periodes** → Boekhouding, tabblad *BTW-aangifte*.
+
+---
+
 ## [1.12.24] — 2026-09-07
 
 ### De factuurmail vanaf een webshoporder zegt nu ook dat er al betaald is

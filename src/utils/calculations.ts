@@ -2224,19 +2224,48 @@ export const fgStabiel = (
 // Zelfde selectie als voorheen inline in App.tsx (thtAlert/thtWarn).
 export interface ThtAlertTelling { verlopen: number; binnenkort: number }
 
+/** Eén lot dat om aandacht vraagt; `dagen` = dagen tot de THT-datum
+    (negatief = al zoveel dagen verlopen, 0 = vandaag). */
+export interface ThtAlertLot { lot: any; dagen: number }
+export interface ThtAlertLots { verlopen: ThtAlertLot[]; binnenkort: ThtAlertLot[] }
+
+// Een 'YYYY-MM-DD' wordt als lokale datum gelezen; `new Date('YYYY-MM-DD')`
+// is UTC-middernacht en verschuift de dag in tijdzones west van UTC.
+const parseLokaleDatum = (s: any): Date => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || ''))
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  const d = new Date(s); d.setHours(0, 0, 0, 0)
+  return d
+}
+
+// De lots zélf achter de telling, gesorteerd op THT-datum (oudste eerst) —
+// zodat een pagina ze allemaal in één lijst kan tonen in plaats van de
+// gebruiker per ingrediënt te laten zoeken.
+export const thtAlertLots = (
+  lots: any[],
+  vandaag: Date = new Date(),
+  binnenDagen = 30,
+): ThtAlertLots => {
+  const t0 = new Date(vandaag); t0.setHours(0, 0, 0, 0)
+  const verlopen: ThtAlertLot[] = [], binnenkort: ThtAlertLot[] = []
+  for (const l of (lots || [])) {
+    if (!l?.beschikbaar || !(Number(l.hoeveelheid || 0) > 0) || !l.houdbaarheid) continue
+    const d = parseLokaleDatum(l.houdbaarheid)
+    if (isNaN(d.getTime())) continue
+    const dagen = Math.round((d.getTime() - t0.getTime()) / 86400000)
+    if (d < t0) verlopen.push({ lot: l, dagen })
+    else if (dagen <= binnenDagen) binnenkort.push({ lot: l, dagen })
+  }
+  const opDatum = (a: ThtAlertLot, b: ThtAlertLot) => a.dagen - b.dagen
+  return { verlopen: verlopen.sort(opDatum), binnenkort: binnenkort.sort(opDatum) }
+}
+
 export const telThtAlerts = (
   lots: any[],
   vandaag: Date = new Date(),
   binnenDagen = 30,
 ): ThtAlertTelling => {
-  const t0 = new Date(vandaag); t0.setHours(0, 0, 0, 0)
-  let verlopen = 0, binnenkort = 0
-  for (const l of (lots || [])) {
-    if (!l?.beschikbaar || !(Number(l.hoeveelheid || 0) > 0) || !l.houdbaarheid) continue
-    const d = new Date(l.houdbaarheid)
-    if (d < t0) verlopen++
-    else if ((d.getTime() - t0.getTime()) / 86400000 <= binnenDagen) binnenkort++
-  }
-  return { verlopen, binnenkort }
+  const r = thtAlertLots(lots, vandaag, binnenDagen)
+  return { verlopen: r.verlopen.length, binnenkort: r.binnenkort.length }
 }
 
