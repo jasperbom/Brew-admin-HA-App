@@ -1843,7 +1843,11 @@ function InstellingenPage({accijnsInst, setAccijnsInst, log, setLog, doExport, d
           {/* `factuur_betaald` is de tekst voor een factuur die al voldaan is
               (webshoporder betaald in WooCommerce, kassaverkoop) — die vraagt
               niet om een overboeking. */}
-          {(['pakbon','factuur','factuur_betaald','bestelling'] as const).map((kind) => {
+          {/* `verzending` is de verzendbevestiging die bij "Markeer verzonden"
+              wordt aangeboden (met track & trace); `bestelling` bevat via
+              {levering} de afhaal- of bezorgtekst, incl. de link waarmee een
+              afhaalklant zijn moment kiest (utils/levering.ts). */}
+          {(['pakbon','factuur','factuur_betaald','bestelling','verzending'] as const).map((kind) => {
             const labelKey = `settings_mail_template_${kind}`
             const varsHintKey = `settings_mail_vars_${kind}`
             const defaultSubject = t(`mail_${kind}_subject_default`)

@@ -4,6 +4,47 @@ All notable changes to this project are documented here.
 
 ---
 
+## [1.12.26] — 2026-09-10
+
+### Afhalen of bezorgen: de bestelbevestiging zegt wat de klant nog moet doen
+
+Een webshopklant kiest in de checkout tussen **afhalen** en **bezorgen**, en
+het Craftery-thema laat een afhaalklant daarna zelf een afhaalmoment kiezen op
+een privépagina (`?afhaalmoment=<order>&sleutel=<order_key>`). BrewAdmin wist
+daar niets van: de bestelbevestiging uit de app zei tegen iedereen "zodra de
+bestelling is verzonden, ontvang je de pakbon en factuur".
+
+- **De import leest de levering mee** (`src/utils/levering.ts`, met tests):
+  afhalen of verzenden (verzendmethode `local_pickup`/`pickup_location` =
+  afhalen), de afhaallocatie, het gekozen afhaalmoment
+  (`_craftery_afhaalmoment`, ook "in overleg") en de `order_key`. Net als de
+  betaalstatus wordt dit bij elke import ververst — een klant kiest of verzet
+  zijn moment meestal pas ná het bestellen.
+- **Bestelbevestiging** — nieuwe variabele `{levering}` in de mailtekst (de
+  standaardtekst gebruikt hem al):
+  - afhalen zonder moment → *kies hier wanneer je langskomt* + de link naar
+    de afhaalpagina van de klant;
+  - afhalen met moment → het moment ("zaterdag 29 augustus om 13:00", bij
+    welke locatie) + de link om te verzetten;
+  - "in overleg" → we nemen contact op;
+  - bezorgen → *zodra het pakket de deur uit is, krijg je een
+    verzendbevestiging*;
+  - handmatige order → de oude neutrale regel.
+  Losse variabelen `{afhaallink}`, `{afhaalmoment}`, `{afhaallocatie}` en
+  `{verzendmethode}` voor wie een eigen tekst schrijft. Kale links in een
+  mailtekst zijn nu in elke mailclient klikbaar.
+- **Verzendbevestiging zo snel mogelijk.** *Markeer verzonden* opent eerst een
+  klein venster: track & trace-link (optioneel) en het vinkje
+  *Verzendbevestiging meteen mailen naar …* — standaard aan bij een
+  bezorgorder met e-mailadres, uit bij een afhaalorder. Bevestigen zet de
+  status op Verzonden en opent direct de mail, met de nieuwe template
+  **Verzendbevestiging-mail** (`{verzenddatum}`, `{trackregel}`, `{track}`).
+  Later opnieuw mailen kan met de knop *Mail verzendbevestiging*; de order
+  toont wanneer de bevestiging is gemaild en de track & trace-link.
+- **Zichtbaar op de order**: badge *Afhalen* / *Verzenden* in de lijst en op
+  het detail (oranje zolang een afhaalklant zijn moment nog niet koos),
+  locatie, afhaalmoment en een link naar de afhaalpagina van de klant.
+
 ## [1.12.25] — 2026-09-08
 
 ### De meldingen in de header brengen je nu precies waar het over gaat

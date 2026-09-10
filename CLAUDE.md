@@ -85,6 +85,11 @@ BrewAdmin-HA-App/
 │   │   │                   # webshopthema. Bewaart zelf niets; alleen deze sleutels worden
 │   │   │                   # gelezen/geschreven
 │   │   ├── wcImport.ts     # WooCommerce-order → orderregels: statusquery/paginering, verzendkosten (shipping_lines) + toeslagen (fee_lines), merch-herkenning (geen eigen artikel = vrije regel), betaalstatus (`wcBetaalStatus`: date_paid of processing/completed = betaald)
+│   │   ├── levering.ts     # Afhalen of verzenden per bestelling: uit de WooCommerce-verzendregel
+│   │   │                   # (`local_pickup`/`pickup_location` = afhalen) + het afhaalmoment en de
+│   │   │                   # afhaalpagina van het Craftery-thema (`?afhaalmoment=<id>&sleutel=<order_key>`),
+│   │   │                   # bij elke import ververst; mailvariabelen `{levering}` (bestelbevestiging)
+│   │   │                   # en `{trackregel}` (verzendbevestiging bij "Markeer verzonden")
 │   │   ├── btwCategorie.ts # BTW-categoriecodes (UNCL5305) voor e-facturatie: afleiding uit tarief + land + BTW-nummer, VATEX-codes, EU-landenlijst, landkeuzelijst
 │   │   ├── template.ts     # Mustache-subset renderer ({{waarde}}, {{{ruw}}}, {{#sectie}}, {{^omgekeerd}}) — documentlayouts als data
 │   │   ├── factuurTemplate.ts # Standaard factuurlayout + contextbouwer; eigen layout via brewery_details.factuur_template, bij een fout stille terugval
@@ -548,7 +553,7 @@ Key names are alphanumeric + underscore only (enforced by server). All active ke
 | `btw_instellingen` | object | BTW-aangifte-instellingen: `periode` + `standaard_btw` (voorgesteld tarief bij nieuwe artikelen/verkoopregels, default 21% via `standaardBtwPct` in `utils/btw.ts`) |
 | `ing_type_btw` | object | Standaard BTW% per ingrediënttype |
 | `brewery_details` | object | Brouwerijnaam, adres, land (ISO-2), BTW-nr., KvK, PEPPOL-ID/-schema (e-factuur), website (klikbaar logo in mail), `factuur_velden` (zichtbaarheid) en `factuur_template` (`{html, css}` — eigen factuurlayout, leeg = de ingebouwde standaard uit `utils/factuurTemplate.ts`) |
-| `mail_templates` | object | Aangepaste mail-templates per kind (`pakbon`, `factuur`, `bestelling`) met `subject`/`body`; leeg = i18n-default |
+| `mail_templates` | object | Aangepaste mail-templates per kind (`pakbon`, `factuur`, `factuur_betaald`, `bestelling`, `verzending`) met `subject`/`body`; leeg = i18n-default. `bestelling` kent `{levering}` (afhaal-/bezorgtekst incl. de link naar de afhaalpagina van de klant), `verzending` is de verzendbevestiging met `{trackregel}`/`{track}` — zie `utils/levering.ts` |
 | `gebruikers_rollen` | object | Rollen per HA-ingress-gebruiker (ERP 4.2): `{gebruikers: {naam: rol}, standaard_rol}` met rollen `beheer`/`boekhouding`/`productie`/`alleen_lezen` — server-side afgedwongen, alleen door `beheer` te wijzigen, lockout-guard |
 | `login_instellingen` | object | Styling van de loginpagina op de directe-toegangspoort: titel/ondertitel/knoptekst, accent-/achtergrondkleur (hex), achtergrondafbeelding (data-url), `logo_tonen`. Server rendert met strikte validatie (`_login_pagina`) — pre-auth, dus nooit ongefilterd |
 | `factuur_counter` | object | *(legacy)* Doorlopend factuurnummer per jaar — vervangen door `nummer_reeksen`, alleen nog als migratie-seed gelezen |
@@ -718,6 +723,17 @@ De computed `btwBetaaldePerioden` (memo in `BoekhoudingPage`) leest alle `soort:
   binnenkwam kan later betaald zijn. Een order die in WooCommerce betaald is,
   levert bij afronden een verkoopfactuur met status `betaald` (die factuur
   vraagt niet meer om een overboeking, in de mail noch op de PDF)
+- **Afhalen of verzenden** (`utils/levering.ts`): de verzendregel van de order
+  zegt of de klant afhaalt (`local_pickup`/`pickup_location`) of laat bezorgen.
+  Het Craftery-thema bewaart bij een afhaalorder het gekozen afhaalmoment
+  (`_craftery_afhaalmoment`: `JJJJ-MM-DD UU:MM` of `overleg`) en biedt de
+  klant een privépagina `<winkel>/?afhaalmoment=<order-id>&sleutel=<order_key>`
+  om dat moment te kiezen of te verzetten. De app leest dit bij elke import mee
+  (ook voor bestaande orders — het moment wordt vaak pas later gekozen) en zet
+  het in de bestelbevestiging via `{levering}`. Een bezorgorder krijgt bij
+  *Markeer verzonden* meteen de verzendbevestiging aangeboden (template
+  `verzending`, met track & trace). De app schrijft hier niets van terug naar
+  WooCommerce
 - Credentials in `instellingen` (`wcUrl`, `wcKey`, `wcSecret`)
 - **Productbeheer** (v1.12.8): de volledige productkaart per artikel staat in
   `productArtikel.wc` resp. `merchArtikel.wc` (`WcVelden` uit

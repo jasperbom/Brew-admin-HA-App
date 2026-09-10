@@ -23,6 +23,10 @@ import { bierInvulVelden, bierInfoVoorArtikel } from '../utils/bierinfo'
 import { htmlToPdfBase64 } from '../utils/pdf'
 import { qrDataUrl } from '../utils/qr'
 import { factuurMailBetaalVars } from '../utils/factuurMail'
+import {
+  wcLeveringVelden, leveringVeldenGewijzigd, leveringMailVars, verzendMailVars,
+  leveringOmschrijving, afhaalLink, afhaalmomentLabel, wilVerzendbevestiging,
+} from '../utils/levering'
 import { logAudit } from '../utils/audit'
 import { resolveKlantSnapshot, findKlantVoorOrder } from '../utils/klant'
 import { verkoopFactuurBoeking, stornoBoekingVoor, voegBoekingToe } from '../utils/journaal'
@@ -277,6 +281,21 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
     </span>
   ) : null
 
+  // Afhalen of verzenden (webshoporder). Een afhaalorder zonder gekozen moment
+  // krijgt de oranje "nog te kiezen"-kleur: daar hoort de klant nog iets te
+  // doen, en de bestelbevestiging bevat daarvoor de link.
+  const LeveringBadge = ({b}: {b: any}) => {
+    if (!b?.wc_levering) return null
+    const afhalen = b.wc_levering === 'afhalen'
+    const open = afhalen && !b.wc_afhaalmoment
+    return (
+      <span title={leveringOmschrijving(b)}
+        className={`px-2 py-0.5 rounded-full text-xs font-semibold ${open ? 'bg-orange-100 text-orange-700' : afhalen ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+        {afhalen ? '🏬' : '🚚'} {t(afhalen ? 'orders_levering_afhalen' : 'orders_levering_verzenden')}
+      </span>
+    )
+  }
+
   // Picks voor een bestelling
   const picksVoorOrder = (bestelling_id: number) =>
     (bestellingPicks||[]).filter((p: any) => p.bestelling_id === bestelling_id)
@@ -461,16 +480,24 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
       let imported = 0
       let onbekendeRegels = 0
       const nieuw: any[] = []
-      // Betaalstatus van orders die we al hebben. Een webshoporder komt vaak
-      // binnen als `pending` (iDEAL nog niet afgerond) en is een uur later
-      // betaald; zonder deze verversing bleef de app voor altijd denken dat er
-      // nog geld moest komen — en zei de factuurmail dat ook.
+      // Betaalstatus en levering van orders die we al hebben. Een webshoporder
+      // komt vaak binnen als `pending` (iDEAL nog niet afgerond) en is een uur
+      // later betaald; zonder deze verversing bleef de app voor altijd denken
+      // dat er nog geld moest komen — en zei de factuurmail dat ook. Het
+      // afhaalmoment kiest (of verzet) de klant vaak pas ná het bestellen, dus
+      // dat wordt op dezelfde manier bijgehouden (utils/levering.ts).
       const betaalUpdates: Record<number, any> = {}
       for (const o of (orders||[])) {
         if (bestaandeWcIds.has(o.id)) {
           const bestaand = (bestellingen||[]).find((b: any) => b.wc_order_id === o.id)
+          if (!bestaand) continue
           const velden = wcBetaalVelden(o)
-          if (bestaand && betaalVeldenGewijzigd(bestaand, velden)) betaalUpdates[bestaand.id] = velden
+          const levering = wcLeveringVelden(o)
+          const upd = {
+            ...(betaalVeldenGewijzigd(bestaand, velden) ? velden : {}),
+            ...(leveringVeldenGewijzigd(bestaand, levering) ? levering : {}),
+          }
+          if (Object.keys(upd).length) betaalUpdates[bestaand.id] = upd
           continue
         }
         // Productregels + verzendkosten + toeslagen, met autoritatieve
@@ -498,6 +525,9 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
           // PSP uitbetaalt — niet de dag waarop jij de order afrondt en de
           // factuur maakt; de bankkoppeling zoekt daarop.
           ...wcBetaalVelden(o),
+          // Afhalen of verzenden, afhaallocatie/-moment en de order_key voor
+          // de afhaalpagina van de klant (utils/levering.ts).
+          ...wcLeveringVelden(o),
           klant_naam: `${o.billing?.first_name||''} ${o.billing?.last_name||''}`.trim() || t('lbl_onbekend'),
           klant_email: o.billing?.email||'',
           klant_straat: o.billing?.address_1||'',
@@ -524,10 +554,17 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
           ...nieuw,
         ])
         nieuw.forEach((o: any) => logAudit(auditLog, setAuditLog, {entiteit:'Bestelling', entiteit_id:o.id, actie:'aangemaakt', omschrijving:`WC import — ${o.klant_naam||'onbekend'}`}))
-        Object.keys(betaalUpdates).forEach(id => logAudit(auditLog, setAuditLog, {
-          entiteit:'Bestelling', entiteit_id:Number(id), actie:'gewijzigd',
-          omschrijving:`WC betaalstatus — ${betaalUpdates[Number(id)].wc_betaald ? 'betaald' : 'open'}`,
-        }))
+        Object.keys(betaalUpdates).forEach(id => {
+          const upd = betaalUpdates[Number(id)]
+          const delen = [
+            'wc_betaald' in upd ? `betaalstatus ${upd.wc_betaald ? 'betaald' : 'open'}` : '',
+            'wc_levering' in upd ? `levering ${leveringOmschrijving(upd)}` : '',
+          ].filter(Boolean)
+          logAudit(auditLog, setAuditLog, {
+            entiteit:'Bestelling', entiteit_id:Number(id), actie:'gewijzigd',
+            omschrijving:`WC bijgewerkt — ${delen.join(' · ')}`,
+          })
+        })
       }
       const melding = t('msg_wc_orders_imported').replace('{n}', String(imported))
       // Niet-herkende regels expliciet melden: die komen als vrije regel binnen
@@ -985,17 +1022,35 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
   }
 
   // --- Markeer als verzonden (logistieke statusovergang — Douane v2.4 §10.2) ---
+  // Opent eerst een klein venster voor de track & trace-link en de keuze om de
+  // verzendbevestiging meteen te mailen: een klant die voor bezorgen koos,
+  // krijgt die zo direct nadat het pakket de deur uit is. Een afhaalklant
+  // hoeft geen verzendbevestiging (utils/levering → wilVerzendbevestiging).
+  const [verzondenModal, setVerzondenModal] = useState<null | {tracking: string, mailen: boolean}>(null)
   const markVerzonden = () => {
     if (!selectedOrder) return
+    const email = resolvedSelectedOrder?.klant_email || selectedOrder.klant_email || ''
+    setVerzondenModal({
+      tracking: selectedOrder.verzend_tracking || '',
+      mailen: !!smtpCreds?.enabled && wilVerzendbevestiging(selectedOrder, email),
+    })
+  }
+  const bevestigVerzonden = () => {
+    if (!selectedOrder || !verzondenModal) return
+    const tracking = verzondenModal.tracking.trim()
+    const datum = tod()
+    const bijgewerkt = {...selectedOrder, status: 'verzonden', verzend_datum: datum, verzend_tracking: tracking || null}
     setBestellingen((prev: any[]) => prev.map((b: any) =>
-      b.id === selectedOrder.id ? {...b, status: 'verzonden', verzend_datum: tod()} : b
+      b.id === selectedOrder.id ? {...b, status: 'verzonden', verzend_datum: datum, verzend_tracking: tracking || null} : b
     ))
     logAudit(auditLog, setAuditLog, {
       entiteit: 'Bestelling',
       entiteit_id: selectedOrder.id,
       actie: 'gewijzigd',
-      omschrijving: `${selectedOrder.klant_naam} — verzonden (logistiek, geen fiscaal effect)`,
+      omschrijving: `${selectedOrder.klant_naam} — verzonden (logistiek, geen fiscaal effect)${tracking ? ` · track & trace ${tracking}` : ''}`,
     })
+    setVerzondenModal(null)
+    if (verzondenModal.mailen) mailOrderVerzending(bijgewerkt)
   }
 
   // --- Order afronden (factuur + pakbon, status → afgerond) ---
@@ -1581,19 +1636,23 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
     text: string
     attachments?: {filename: string, contentBase64: string, mimeType: string}[]
     /** Type mail — bepaalt het log-bericht en (bij 'bevestiging') een status-
-     * overgang van 'nieuw' naar 'bevestigd' na succesvolle verzending. */
-    kind?: 'pakbon' | 'factuur' | 'bevestiging'
+     * overgang van 'nieuw' naar 'bevestigd' na succesvolle verzending; bij
+     * 'verzending' wordt de datum van de verzendbevestiging op de order gezet. */
+    kind?: 'pakbon' | 'factuur' | 'bevestiging' | 'verzending'
     mollie?: {amountCent: number, description: string, redirectUrl: string, factuurnummer?: string} | null
     regenerateAttachments?: (payUrl: string) => Promise<{filename: string, contentBase64: string, mimeType: string}[] | null>
   }>(null)
   const [mailGenerating, setMailGenerating] = React.useState(false)
 
+  // Een leeggebleven variabele (geen track & trace, geen leveringstekst) mag
+  // geen dubbele witregel achterlaten in de mail.
   const interpolate = (tpl: string, vars: Record<string, string>): string =>
     Object.keys(vars).reduce((acc, k) => acc.split(`{${k}}`).join(vars[k] ?? ''), tpl)
+      .replace(/\n{3,}/g, '\n\n')
 
   // Pakt subject/body uit ingestelde mail_templates; valt terug op de i18n-default
   // wanneer de gebruiker niets heeft ingevuld (lege string of niet aanwezig).
-  const tplOrDefault = (key: 'pakbon'|'factuur'|'factuur_betaald'|'bestelling', field: 'subject'|'body'): string => {
+  const tplOrDefault = (key: 'pakbon'|'factuur'|'factuur_betaald'|'bestelling'|'verzending', field: 'subject'|'body'): string => {
     const stored = (mailTemplates as any)?.[key]?.[field]
     if (typeof stored === 'string' && stored.trim()) return stored
     return t(`mail_${key}_${field === 'subject' ? 'subject' : 'body'}_default`)
@@ -1705,17 +1764,23 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
     setMailGenerating(false)
   }
 
+  const regelLijstVoorMail = (order: any): string => (order?.regels||[]).map((r: any) =>
+    `- ${r.aantal}× ${r.bier_naam || r.omschrijving || ''}${r.verpakking_type ? ` (${r.verpakking_type})` : ''}`
+  ).join('\n')
+
   const mailOrderBevestiging = () => {
     if (!selectedOrder) return
     const orderRef = orderNummer(selectedOrder)
-    const regelLijst = (selectedOrder.regels||[]).map((r: any) =>
-      `- ${r.aantal}× ${r.bier_naam || r.omschrijving || ''}${r.verpakking_type ? ` (${r.verpakking_type})` : ''}`
-    ).join('\n')
+    // {levering}: afhalen (mét de link waarmee de klant zijn afhaalmoment
+    // kiest of verzet) of bezorgen (er volgt een verzendbevestiging) — zie
+    // utils/levering.ts. De winkel-URL is nodig om die link na te bouwen.
+    const levering = leveringMailVars(selectedOrder, {storeUrl: wcCreds?.storeUrl || ''})
     const vars = {
       naam: (resolvedSelectedOrder?.klant_naam || resolvedSelectedOrder?.klant_bedrijf || ''),
       nr: orderRef,
-      regels: regelLijst,
+      regels: regelLijstVoorMail(selectedOrder),
       brouwerij: (breweryDetails as any)?.naam || appName || '',
+      ...levering,
     }
     setMailModal({
       title: t('mail_modal_title_bestelling'),
@@ -1723,6 +1788,26 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
       subject: interpolate(tplOrDefault('bestelling', 'subject'), vars),
       text: interpolate(tplOrDefault('bestelling', 'body'), vars),
       kind: 'bevestiging',
+    })
+  }
+
+  // Verzendbevestiging: direct na "Markeer verzonden" (met de zojuist ingevulde
+  // track & trace) of later opnieuw vanaf de orderknoppen.
+  const mailOrderVerzending = (order: any = selectedOrder) => {
+    if (!order) return
+    const vars = {
+      naam: (resolvedSelectedOrder?.klant_naam || resolvedSelectedOrder?.klant_bedrijf || order.klant_naam || ''),
+      nr: orderNummer(order),
+      regels: regelLijstVoorMail(order),
+      brouwerij: (breweryDetails as any)?.naam || appName || '',
+      ...verzendMailVars(order),
+    }
+    setMailModal({
+      title: t('mail_modal_title_verzending'),
+      to: (resolvedSelectedOrder?.klant_email || order.klant_email || ''),
+      subject: interpolate(tplOrDefault('verzending', 'subject'), vars),
+      text: interpolate(tplOrDefault('verzending', 'body'), vars),
+      kind: 'verzending',
     })
   }
 
@@ -1750,6 +1835,7 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
             {t(`orders_status_${selectedOrder.status}`)||selectedOrder.status}
           </span>
           <BetaaldBadge b={selectedOrder} />
+          <LeveringBadge b={selectedOrder} />
           {(() => {
             const kType = effectiveKlantType(selectedOrder)
             if (!kType) return null
@@ -1821,6 +1907,49 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
                   : null
               })()}
               {selectedOrder.verzend_datum && <div className="flex justify-between"><span className="text-gray-500">{t('factuur_delivery_date')}</span><span>{fmtD(selectedOrder.verzend_datum)}</span></div>}
+              {/* Levering: afhalen (locatie + gekozen moment + de afhaalpagina
+                  van de klant) of verzenden (methode, track & trace, wanneer
+                  de verzendbevestiging is gemaild). */}
+              {selectedOrder.wc_levering && (() => {
+                const afhalen = selectedOrder.wc_levering === 'afhalen'
+                const link = afhalen ? afhaalLink(wcCreds?.storeUrl, selectedOrder.wc_order_id, selectedOrder.wc_order_key) : ''
+                return (<>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-gray-500">{t('orders_levering')}</span>
+                    <span className="text-right">
+                      {t(afhalen ? 'orders_levering_afhalen' : 'orders_levering_verzenden')}
+                      {afhalen && selectedOrder.wc_afhaal_locatie ? ` · ${selectedOrder.wc_afhaal_locatie}` : ''}
+                      {!afhalen && selectedOrder.wc_verzendmethode ? ` · ${selectedOrder.wc_verzendmethode}` : ''}
+                    </span>
+                  </div>
+                  {afhalen && (
+                    <div className="flex justify-between gap-3">
+                      <span className="text-gray-500">{t('orders_afhaalmoment')}</span>
+                      <span className={`text-right ${selectedOrder.wc_afhaalmoment ? '' : 'text-orange-600 italic'}`}>
+                        {selectedOrder.wc_afhaalmoment ? afhaalmomentLabel(selectedOrder.wc_afhaalmoment) : t('orders_afhaalmoment_open')}
+                      </span>
+                    </div>
+                  )}
+                  {link && (
+                    <div className="text-right">
+                      <a href={link} target="_blank" rel="noopener noreferrer" className="text-xs underline" style={{color: 'var(--t-accent)'}}>
+                        {t('orders_afhaal_link')}
+                      </a>
+                    </div>
+                  )}
+                </>)
+              })()}
+              {selectedOrder.verzend_tracking && (
+                <div className="flex justify-between gap-3">
+                  <span className="text-gray-500">{t('orders_track')}</span>
+                  {/^https?:\/\//i.test(selectedOrder.verzend_tracking)
+                    ? <a href={selectedOrder.verzend_tracking} target="_blank" rel="noopener noreferrer" className="underline break-all text-right" style={{color: 'var(--t-accent)'}}>{selectedOrder.verzend_tracking}</a>
+                    : <span className="font-mono break-all text-right">{selectedOrder.verzend_tracking}</span>}
+                </div>
+              )}
+              {selectedOrder.verzendbevestiging_datum && (
+                <div className="text-xs text-green-700">{t('orders_verzendbevestiging_op').replace('{datum}', fmtD(selectedOrder.verzendbevestiging_datum))}</div>
+              )}
               <div className="flex justify-between"><span className="text-gray-500">{t('orders_total')}</span><span className="font-semibold">{fmt(totaal)}</span></div>
               {selectedOrder.factuur_nummer && <div className="flex justify-between"><span className="text-gray-500">{t('factuur_number')}</span><span className="font-mono">{selectedOrder.factuur_nummer}</span></div>}
               {selectedOrder.pakbon_nummer && <div className="flex justify-between"><span className="text-gray-500">{t('pakbon_number')}</span><span className="font-mono">{selectedOrder.pakbon_nummer}</span></div>}
@@ -2021,6 +2150,11 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
             <Btn v="secondary" onClick={mailOrderFactuur} disabled={!smtpCreds?.enabled || mailGenerating} title={!smtpCreds?.enabled ? t('mail_no_smtp') : ''}>
               {mailGenerating ? '⏳ ' + t('mail_generating_pdf') : '✉ ' + t('order_mail_factuur')}
             </Btn>
+            {selectedOrder.wc_levering !== 'afhalen' && (
+              <Btn v="secondary" onClick={() => mailOrderVerzending()} disabled={!smtpCreds?.enabled} title={!smtpCreds?.enabled ? t('mail_no_smtp') : ''}>
+                📦 {t('order_mail_verzending')}
+              </Btn>
+            )}
           </>)}
           {(selectedOrder.status === 'nieuw' || selectedOrder.status === 'bevestigd') && (
             <Btn v="secondary" onClick={mailOrderBevestiging} disabled={!smtpCreds?.enabled} title={!smtpCreds?.enabled ? t('mail_no_smtp') : ''}>
@@ -2092,8 +2226,16 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
                 mailModal.kind === 'pakbon'      ? `Pakbon gemaild naar ${naar}` :
                 mailModal.kind === 'factuur'     ? `Factuur gemaild naar ${naar}` :
                 mailModal.kind === 'bevestiging' ? `Bevestigingsmail verstuurd naar ${naar}` :
+                mailModal.kind === 'verzending'  ? `Verzendbevestiging gemaild naar ${naar}` :
                 `Mail verstuurd: ${mailModal.subject}`
               logAudit(auditLog, setAuditLog, {entiteit:'Bestelling', entiteit_id: selectedOrder.id, actie:'gewijzigd', omschrijving})
+              // Onthoud wanneer de verzendbevestiging de deur uit ging, zodat
+              // de order laat zien dat de klant al bericht heeft gehad.
+              if (mailModal.kind === 'verzending') {
+                setBestellingen((prev: any[]) => prev.map((b: any) =>
+                  b.id === selectedOrder.id ? {...b, verzendbevestiging_datum: tod()} : b
+                ))
+              }
               // Status-overgang: een 'nieuw' order wordt 'bevestigd' zodra de
               // bevestigingsmail succesvol is verzonden. Latere statussen
               // (gepickt/verzonden/...) worden niet overschreven — een resend
@@ -2391,6 +2533,41 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
               <Btn onClick={savePicks}>{t('picking_confirm')}</Btn>
             </div>
           </Modal>
+          )
+        })()}
+
+        {/* Markeer verzonden: track & trace + verzendbevestiging meteen mailen */}
+        {verzondenModal && (() => {
+          const email = resolvedSelectedOrder?.klant_email || selectedOrder.klant_email || ''
+          const afhalen = selectedOrder.wc_levering === 'afhalen'
+          return (
+            <Modal title={t('verzonden_modal_title')} onClose={() => setVerzondenModal(null)}>
+              <div className="space-y-3">
+                <p className="text-sm text-gray-600">{t('verzonden_modal_intro')}</p>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{t('verzonden_modal_track')}</label>
+                  <Inp value={verzondenModal.tracking} onChange={(v: string) => setVerzondenModal(m => m && ({...m, tracking: v}))} placeholder="https://…" />
+                </div>
+                {email ? (
+                  <label className={`flex items-start gap-2 text-sm rounded px-3 py-2 border ${smtpCreds?.enabled ? 'border-gray-200 bg-gray-50 cursor-pointer' : 'border-orange-200 bg-orange-50 cursor-not-allowed'}`}
+                    title={smtpCreds?.enabled ? '' : t('mail_no_smtp')}>
+                    <input type="checkbox" className="t-checkbox mt-0.5" checked={verzondenModal.mailen} disabled={!smtpCreds?.enabled}
+                      onChange={e => setVerzondenModal(m => m && ({...m, mailen: e.target.checked}))} />
+                    <span>
+                      <span className="font-medium text-gray-700">{t('verzonden_modal_mailen').replace('{email}', email)}</span>
+                      {afhalen && <span className="block text-xs text-gray-500">{t('verzonden_modal_afhaal_hint')}</span>}
+                      {!smtpCreds?.enabled && <span className="block text-xs text-orange-700">{t('mail_no_smtp')}</span>}
+                    </span>
+                  </label>
+                ) : (
+                  <p className="text-xs text-gray-500">{t('verzonden_modal_geen_email')}</p>
+                )}
+                <div className="flex justify-end gap-2 pt-1 border-t">
+                  <Btn v="secondary" onClick={() => setVerzondenModal(null)}>{t('btn_cancel')}</Btn>
+                  <Btn onClick={bevestigVerzonden}>📦 {t('order_mark_shipped')}</Btn>
+                </div>
+              </div>
+            </Modal>
           )
         })()}
 
@@ -2749,6 +2926,7 @@ const BestellingenPage: React.FC<BestellingenPageProps> = ({
               <div className="flex items-center gap-3">
                 {picks.length > 0 && <span className="text-xs text-gray-400">{t('msg_stuks_gepickt').replace('{n}', String(picks.reduce((s: number, p: any) => s+p.aantal,0)))}</span>}
                 <BetaaldBadge b={b} />
+                <LeveringBadge b={b} />
                 <span className="font-semibold text-gray-800">{fmt(totaal)}</span>
                 <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${STATUS_COLORS[b.status]||'bg-gray-100'}`}>
                   {t(`orders_status_${b.status}`)||b.status}

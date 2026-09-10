@@ -1118,10 +1118,25 @@ export interface Bestelling {
   wc_betaald_datum?: string
   wc_betaal_methode?: string
   wc_transactie_id?: string
+  // Afhalen of verzenden, zoals de klant het in de webshop koos (zie
+  // utils/levering → wcLeveringVelden). Bij een afhaalorder ook de locatie en
+  // het afhaalmoment dat de klant via het Craftery-thema kiest; `wc_order_key`
+  // is nodig voor de link naar zijn afhaalpagina. Bij elke import ververst.
+  wc_levering?: 'afhalen' | 'verzenden'
+  wc_verzendmethode?: string
+  wc_order_key?: string
+  wc_afhaal_locatie?: string
+  wc_afhaal_adres?: string
+  wc_afhaalmoment?: string
   factuur_id?: number | null
   factuur_nummer?: string | null
   pakbon_nummer?: string | null
   verzend_datum?: string | null
+  // Track & trace-link of -code, ingevuld bij "Markeer verzonden"; gaat mee in
+  // de verzendbevestiging.
+  verzend_tracking?: string | null
+  // Datum waarop de verzendbevestiging naar de klant is gemaild.
+  verzendbevestiging_datum?: string | null
 }
 
 export interface GistMeting {
